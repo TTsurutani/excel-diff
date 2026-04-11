@@ -184,24 +184,25 @@ def make_chartest():
         ["同一値（差分なし確認）",   "変更なし",             "変更なし"],
     ]
 
-    header = ["パターン説明", "旧値", "新値"]
+    # 旧・新ともに [説明, 値] の同一列構成にする
+    # → diff時に「B列の値が変わった」として正しく1セルに差分が出る
 
     # --- 旧ファイル ---
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "文字diff確認"
-    ws.append(header)
+    ws.append(["パターン説明", "値"])
     for desc, old, _ in patterns:
-        ws.append([desc, old, None])
+        ws.append([desc, old])
     wb.save(FIXTURES_DIR / "chartest_old.xlsx")
 
     # --- 新ファイル ---
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "文字diff確認"
-    ws.append(header)
+    ws.append(["パターン説明", "値"])
     for desc, _, new in patterns:
-        ws.append([desc, None, new])
+        ws.append([desc, new])
     wb.save(FIXTURES_DIR / "chartest_new.xlsx")
 
     print(f"生成: chartest_old.xlsx / chartest_new.xlsx ({len(patterns)} パターン)")
