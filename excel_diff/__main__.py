@@ -49,6 +49,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="取り消し線の有無も差分として扱う")
     p.add_argument("--matchers", metavar="FILE",
                    help="カスタムマッチャー設定JSONファイル")
+    p.add_argument("--include-cols", metavar="SPEC",
+                   help="比較対象列（例: A:C,E）。省略時は全列比較")
     p.add_argument("--open", action="store_true",
                    help="生成後にブラウザで自動オープン")
     return p
@@ -60,11 +62,30 @@ def _default_output_path(new_file: str) -> str:
     return str(parent / f"{stem}_diff.html")
 
 
+def _build_config(args: argparse.Namespace):
+    """引数から DiffConfig を組み立てて返す。"""
+    from .matcher import load_config, DiffConfig, parse_col_spec
+
+    if args.matchers:
+        if not os.path.isfile(args.matchers):
+            print(f"エラー: マッチャー設定ファイルが見つかりません: {args.matchers}", file=sys.stderr)
+            sys.exit(1)
+        config = load_config(args.matchers)
+        print(f"カスタムマッチャー: {len(config.matchers)} 件ロード")
+    else:
+        config = DiffConfig()
+
+    # --include-cols はコマンドライン側でグローバルフィルタを上書き
+    if args.include_cols:
+        config.global_col_filter = parse_col_spec(args.include_cols)
+
+    return config
+
+
 def _run_file_diff(args: argparse.Namespace) -> None:
     from .reader import read_workbook
     from .diff_engine import diff_files
     from .html_renderer import render
-    from .matcher import load_matchers
 
     old_path = args.old_file
     new_path = args.new_file
@@ -76,13 +97,7 @@ def _run_file_diff(args: argparse.Namespace) -> None:
         print(f"エラー: ファイルが見つかりません: {new_path}", file=sys.stderr)
         sys.exit(1)
 
-    matchers = []
-    if args.matchers:
-        if not os.path.isfile(args.matchers):
-            print(f"エラー: マッチャー設定ファイルが見つかりません: {args.matchers}", file=sys.stderr)
-            sys.exit(1)
-        matchers = load_matchers(args.matchers)
-        print(f"カスタムマッチャー: {len(matchers)} 件ロード")
+    config = _build_config(args)
 
     print(f"読み込み中: {old_path}")
     old_sheets = read_workbook(old_path, args.strikethrough, args.sheet)
@@ -93,8 +108,8 @@ def _run_file_diff(args: argparse.Namespace) -> None:
     file_diff = diff_files(
         old_sheets, new_sheets,
         old_path, new_path,
-        matchers=matchers,
         include_strike=args.strikethrough,
+        config=config,
     )
 
     output_path = args.output or _default_output_path(new_path)
@@ -116,7 +131,6 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
     from .reader import read_workbook
     from .diff_engine import diff_files
     from .html_renderer import render
-    from .matcher import load_matchers
 
     old_dir, new_dir = args.dir
 
@@ -127,13 +141,7 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
         print(f"エラー: ディレクトリが見つかりません: {new_dir}", file=sys.stderr)
         sys.exit(1)
 
-    matchers = []
-    if args.matchers:
-        if not os.path.isfile(args.matchers):
-            print(f"エラー: マッチャー設定ファイルが見つかりません: {args.matchers}", file=sys.stderr)
-            sys.exit(1)
-        matchers = load_matchers(args.matchers)
-        print(f"カスタムマッチャー: {len(matchers)} 件ロード")
+    config = _build_config(args)
 
     # 両ディレクトリの .xlsx ファイル名を収集
     old_files = {
@@ -182,8 +190,8 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
             old_sheets, new_sheets,
             old_path if os.path.isfile(old_path) else f"(なし)/{fname}",
             new_path if os.path.isfile(new_path) else f"(なし)/{fname}",
-            matchers=matchers,
             include_strike=args.strikethrough,
+            config=config,
         )
 
         stem = Path(fname).stem

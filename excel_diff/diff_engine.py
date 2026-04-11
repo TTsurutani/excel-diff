@@ -46,10 +46,11 @@ class RowDiff:
 @dataclass
 class SheetDiff:
     name: str
-    status: str                      # "equal" / "modified" / "added" / "deleted"
+    status: str                           # "equal" / "modified" / "added" / "deleted"
     row_diffs: list[RowDiff] = field(default_factory=list)
     max_cols: int = 0
-    col_letters: list[str] = field(default_factory=list)  # ["A", "B", ...]
+    col_letters: list[str] = field(default_factory=list)   # ["A", "B", ...]
+    col_filter: Optional[set[int]] = None  # 比較対象列（None = 全列）
 
 
 @dataclass
@@ -98,13 +99,17 @@ def _normalize_row_key(
     sheet_name: str,
     matchers: list[ColumnMatcher],
     include_strike: bool,
+    col_filter: Optional[set[int]],
 ) -> tuple:
     """
     行をLCS比較用の正規化キーに変換する。
+    col_filter が指定されている場合は対象列のみハッシュに含める。
     カスタムマッチャーが適用される列は (_SENTINEL, canonical_old_val) に正規化される。
     """
     key: list[Any] = []
     for i, cell in enumerate(cells):
+        if col_filter is not None and i not in col_filter:
+            continue  # 比較対象外の列はハッシュから除外
         val = cell.value
         matched = False
         for m in matchers:
@@ -121,22 +126,38 @@ def _normalize_row_key(
     return tuple(key)
 
 
-def _row_similarity(row_a: RowData, row_b: RowData, max_cols: int) -> float:
-    """2行の類似度を返す（一致セル数 / max_cols, 0.0〜1.0）。"""
+def _row_similarity(
+    row_a: RowData,
+    row_b: RowData,
+    max_cols: int,
+    col_filter: Optional[set[int]],
+) -> float:
+    """
+    2行の類似度を返す（比較対象列における一致セル数 / 比較対象列数）。
+    col_filter が None の場合は全列を対象とする。
+    """
     a_cells = _pad_cells(row_a.cells, max_cols)
     b_cells = _pad_cells(row_b.cells, max_cols)
-    matches = sum(1 for ac, bc in zip(a_cells, b_cells) if ac.value == bc.value)
-    return matches / max_cols if max_cols > 0 else 0.0
+    cols = range(max_cols) if col_filter is None else sorted(col_filter)
+    total = len(cols)
+    if total == 0:
+        return 0.0
+    matches = sum(
+        1 for i in cols
+        if i < len(a_cells) and i < len(b_cells) and a_cells[i].value == b_cells[i].value
+    )
+    return matches / total
 
 
 def _pair_replace_rows(
     a_rows: list[RowData],
     b_rows: list[RowData],
     max_cols: int,
+    col_filter: Optional[set[int]],
 ) -> list[tuple]:
     """
     replace ブロック内の行を類似度でペアリングする。
-    1セルも一致しないペアは作らず、残りは DELETE / INSERT として返す。
+    比較対象列で 1セルも一致しないペアは作らず、残りは DELETE / INSERT として返す。
     戻り値: [(old_row|None, new_row|None), ...]
     """
     if not a_rows:
@@ -144,9 +165,8 @@ def _pair_replace_rows(
     if not b_rows:
         return [(a, None) for a in a_rows]
 
-    # 全ペアの類似度を降順ソート
     scored = sorted(
-        [(_row_similarity(a_rows[i], b_rows[j], max_cols), i, j)
+        [(_row_similarity(a_rows[i], b_rows[j], max_cols, col_filter), i, j)
          for i in range(len(a_rows))
          for j in range(len(b_rows))],
         reverse=True,
@@ -160,13 +180,11 @@ def _pair_replace_rows(
         if i in used_a or j in used_b:
             continue
         if score <= 0.0:
-            # 1セルも一致しない場合はペアリングしない
             break
         pairs.append((a_rows[i], b_rows[j]))
         used_a.add(i)
         used_b.add(j)
 
-    # 未ペアの行は DELETE / INSERT
     for i, a in enumerate(a_rows):
         if i not in used_a:
             pairs.append((a, None))
@@ -184,12 +202,15 @@ def _compute_cell_diffs(
     sheet_name: str,
     matchers: list[ColumnMatcher],
     include_strike: bool,
+    col_filter: Optional[set[int]],
 ) -> list[CellDiff]:
-    """MODIFY行のセルレベル差分を計算する。"""
+    """MODIFY行のセルレベル差分を計算する（比較対象列のみ）。"""
     old_cells = _pad_cells(old_row.cells, max_cols)
     new_cells = _pad_cells(new_row.cells, max_cols)
     diffs: list[CellDiff] = []
     for i, (oc, nc) in enumerate(zip(old_cells, new_cells)):
+        if col_filter is not None and i not in col_filter:
+            continue  # 比較対象外の列はスキップ
         if not _cell_equal(oc, nc, i, sheet_name, matchers, include_strike):
             diffs.append(CellDiff(col_idx=i, old_cell=oc, new_cell=nc))
     return diffs
@@ -206,16 +227,16 @@ def _diff_sheet_rows(
     max_cols: int,
     matchers: list[ColumnMatcher],
     include_strike: bool,
+    col_filter: Optional[set[int]],
 ) -> list[RowDiff]:
     """行リスト同士をLCSで差分計算し RowDiff のリストを返す。"""
 
-    # LCS用に行を正規化キー化
     keys_a = [
-        _normalize_row_key(_pad_cells(r.cells, max_cols), "old", sheet_name, matchers, include_strike)
+        _normalize_row_key(_pad_cells(r.cells, max_cols), "old", sheet_name, matchers, include_strike, col_filter)
         for r in rows_a
     ]
     keys_b = [
-        _normalize_row_key(_pad_cells(r.cells, max_cols), "new", sheet_name, matchers, include_strike)
+        _normalize_row_key(_pad_cells(r.cells, max_cols), "new", sheet_name, matchers, include_strike, col_filter)
         for r in rows_b
     ]
 
@@ -239,20 +260,18 @@ def _diff_sheet_rows(
             a_slice = rows_a[i1:i2]
             b_slice = rows_b[j1:j2]
 
-            # 類似度ベースでペアリング（位置順ではなく内容で対応付け）
-            for old_row, new_row in _pair_replace_rows(a_slice, b_slice, max_cols):
+            for old_row, new_row in _pair_replace_rows(a_slice, b_slice, max_cols, col_filter):
                 if old_row is None:
                     result.append(RowDiff(RowTag.INSERT, None, new_row))
                 elif new_row is None:
                     result.append(RowDiff(RowTag.DELETE, old_row, None))
                 else:
                     cell_diffs = _compute_cell_diffs(
-                        old_row, new_row, max_cols, sheet_name, matchers, include_strike
+                        old_row, new_row, max_cols, sheet_name, matchers, include_strike, col_filter
                     )
                     if cell_diffs:
                         result.append(RowDiff(RowTag.MODIFY, old_row, new_row, cell_diffs))
                     else:
-                        # カスタムマッチャーにより全セルが等値になった場合
                         result.append(RowDiff(RowTag.EQUAL, old_row, new_row))
 
     return result
@@ -265,6 +284,7 @@ def diff_files(
     new_path: str,
     matchers: Optional[list[ColumnMatcher]] = None,
     include_strike: bool = False,
+    config: Optional[object] = None,   # DiffConfig（循環import回避のため型はobject）
 ) -> FileDiff:
     """
     2つのブック（シート辞書）の差分を計算して FileDiff を返す。
@@ -276,47 +296,51 @@ def diff_files(
     old_path / new_path:
         表示用ファイルパス
     matchers:
-        カスタムマッチャーのリスト（省略可）
+        カスタムマッチャーのリスト（config未指定時に使用）
     include_strike:
         取り消し線を差分として扱うか
+    config:
+        DiffConfig オブジェクト（matchers + 列フィルタをまとめて指定）
     """
-    matchers = matchers or []
+    # config が渡された場合はそちらを優先
+    if config is not None:
+        effective_matchers = config.matchers
+        get_col_filter = config.get_col_filter
+    else:
+        effective_matchers = matchers or []
+        get_col_filter = lambda _sheet: None  # noqa: E731
+
     result = FileDiff(
         old_path=old_path,
         new_path=new_path,
-        matcher_count=len(matchers),
+        matcher_count=len(effective_matchers),
     )
 
-    # シートの出現順を保ちつつ全シートを処理
     all_names: list[str] = list(dict.fromkeys(list(old_sheets.keys()) + list(new_sheets.keys())))
 
     for name in all_names:
         old_s = old_sheets.get(name)
         new_s = new_sheets.get(name)
+        col_filter = get_col_filter(name)
 
         if old_s is None:
-            # シート追加
             max_cols = new_s.max_col
             col_letters = [get_column_letter(i) for i in range(1, max_cols + 1)]
             row_diffs = [RowDiff(RowTag.INSERT, None, r) for r in new_s.rows]
-            result.sheet_diffs.append(SheetDiff(name, "added", row_diffs, max_cols, col_letters))
+            result.sheet_diffs.append(SheetDiff(name, "added", row_diffs, max_cols, col_letters, col_filter))
             result.has_differences = True
 
         elif new_s is None:
-            # シート削除
             max_cols = old_s.max_col
             col_letters = [get_column_letter(i) for i in range(1, max_cols + 1)]
             row_diffs = [RowDiff(RowTag.DELETE, r, None) for r in old_s.rows]
-            result.sheet_diffs.append(SheetDiff(name, "deleted", row_diffs, max_cols, col_letters))
+            result.sheet_diffs.append(SheetDiff(name, "deleted", row_diffs, max_cols, col_letters, col_filter))
             result.has_differences = True
 
         else:
-            # 両方に存在 → 差分計算
             max_cols = max(old_s.max_col, new_s.max_col, 1)
             col_letters = [get_column_letter(i) for i in range(1, max_cols + 1)]
-
-            # matchers をシートでフィルタして渡す（パフォーマンス用）
-            sheet_matchers = [m for m in matchers if m.sheet is None or m.sheet == name]
+            sheet_matchers = [m for m in effective_matchers if m.sheet is None or m.sheet == name]
 
             row_diffs = _diff_sheet_rows(
                 name,
@@ -325,10 +349,11 @@ def diff_files(
                 max_cols,
                 sheet_matchers,
                 include_strike,
+                col_filter,
             )
             has_diff = any(rd.tag != RowTag.EQUAL for rd in row_diffs)
             status = "modified" if has_diff else "equal"
-            result.sheet_diffs.append(SheetDiff(name, status, row_diffs, max_cols, col_letters))
+            result.sheet_diffs.append(SheetDiff(name, status, row_diffs, max_cols, col_letters, col_filter))
             if has_diff:
                 result.has_differences = True
 

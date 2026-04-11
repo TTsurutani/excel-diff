@@ -193,6 +193,8 @@ body {
 .empty-side td { background: #fafafa !important; }
 /* 取り消し線 */
 .strike { text-decoration: line-through; }
+/* 除外列（比較対象外） */
+.cell-excluded { color: #bbb !important; background: #f8f8f8 !important; }
 """
 
 # ---------------------------------------------------------------------------
@@ -267,7 +269,11 @@ def _render_cell_pair_diff(
     return old_html, new_html
 
 
-def _render_row(row_diff: RowDiff, max_cols: int) -> str:
+def _render_row(
+    row_diff: RowDiff,
+    max_cols: int,
+    col_filter: Optional[set[int]] = None,
+) -> str:
     tag = row_diff.tag
     css_class = {
         RowTag.EQUAL:  "row-equal",
@@ -288,13 +294,18 @@ def _render_row(row_diff: RowDiff, max_cols: int) -> str:
         for col_idx, cd in changed.items():
             char_diffs[col_idx] = _render_cell_pair_diff(cd.old_cell, cd.new_cell)
 
+    def _is_excluded(i: int) -> bool:
+        return col_filter is not None and i not in col_filter
+
     # 旧側セル
     if row_diff.old_row:
         cells = row_diff.old_row.cells
         old_tds = ""
         for i in range(max_cols):
             cell = cells[i] if i < len(cells) else None
-            if i in changed:
+            if _is_excluded(i):
+                old_tds += f'<td class="cell-excluded">{_render_cell_value(cell)}</td>'
+            elif i in changed:
                 content = char_diffs[i][0] if char_diffs else _render_cell_value(cell)
                 old_tds += f'<td class="cell-old">{content}</td>'
             else:
@@ -308,7 +319,9 @@ def _render_row(row_diff: RowDiff, max_cols: int) -> str:
         new_tds = ""
         for i in range(max_cols):
             cell = cells[i] if i < len(cells) else None
-            if i in changed:
+            if _is_excluded(i):
+                new_tds += f'<td class="cell-excluded">{_render_cell_value(cell)}</td>'
+            elif i in changed:
                 content = char_diffs[i][1] if char_diffs else _render_cell_value(cell)
                 new_tds += f'<td class="cell-new">{content}</td>'
             else:
@@ -356,7 +369,7 @@ def _render_sheet(sheet_diff: SheetDiff) -> str:
     )
 
     rows_html = "\n".join(
-        _render_row(rd, sheet_diff.max_cols)
+        _render_row(rd, sheet_diff.max_cols, sheet_diff.col_filter)
         for rd in sheet_diff.row_diffs
     )
 

@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from excel_diff.reader import CellData, RowData, SheetData
 from excel_diff.diff_engine import diff_files, RowTag
-from excel_diff.matcher import MappingMatcher
+from excel_diff.matcher import MappingMatcher, DiffConfig, parse_col_spec
 from excel_diff.html_renderer import _render_cell_pair_diff
 
 
@@ -31,10 +31,10 @@ def make_sheet(name: str, data: list[list]) -> SheetData:
     return SheetData(name=name, rows=rows, max_col=max_col)
 
 
-def run_diff(old_data, new_data, matchers=None):
+def run_diff(old_data, new_data, matchers=None, config=None):
     old = {"Sheet1": make_sheet("Sheet1", old_data)}
     new = {"Sheet1": make_sheet("Sheet1", new_data)}
-    return diff_files(old, new, "old.xlsx", "new.xlsx", matchers=matchers)
+    return diff_files(old, new, "old.xlsx", "new.xlsx", matchers=matchers, config=config)
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +260,88 @@ def t_row_numbers():
 
 
 # ---------------------------------------------------------------------------
+# 列フィルタ テスト
+# ---------------------------------------------------------------------------
+
+def t_parse_col_spec_single():
+    """parse_col_spec: 単一列 "B" → {1}"""
+    assert parse_col_spec("B") == {1}
+
+
+def t_parse_col_spec_range():
+    """parse_col_spec: 連続範囲 "A:C" → {0,1,2}"""
+    assert parse_col_spec("A:C") == {0, 1, 2}
+
+
+def t_parse_col_spec_noncontiguous():
+    """parse_col_spec: 飛び地 "A,C,E" → {0,2,4}"""
+    assert parse_col_spec("A,C,E") == {0, 2, 4}
+
+
+def t_parse_col_spec_mixed():
+    """parse_col_spec: 混在 "A:C,E" → {0,1,2,4}"""
+    assert parse_col_spec("A:C,E") == {0, 1, 2, 4}
+
+
+def t_col_filter_excludes_diff():
+    """列フィルタ: 除外列の変更は差分として検出しない"""
+    # 列A(idx=0)のみ比較、列B(idx=1)は除外
+    # 列Bが変わっても差分なし
+    config = DiffConfig(global_col_filter={0})
+    result = run_diff(
+        [["同じ", "旧値"]],
+        [["同じ", "新値"]],
+        config=config,
+    )
+    assert not result.has_differences, "除外列の変更が差分として検出された"
+
+
+def t_col_filter_detects_included_diff():
+    """列フィルタ: 対象列の変更は差分として検出し、除外列は cell_diffs に含まない"""
+    # 列A・B(idx=0,1)を比較対象、列C(idx=2)は除外
+    # 列B が変わる → MODIFY として検出され、cell_diffs は col_idx=1 のみ
+    config = DiffConfig(global_col_filter={0, 1})
+    result = run_diff(
+        [["同じID", "旧値B", "除外列値"]],
+        [["同じID", "新値B", "除外列値変更"]],
+        config=config,
+    )
+    assert result.has_differences, "対象列の変更が検出されなかった"
+    sd = result.sheet_diffs[0]
+    modified = [rd for rd in sd.row_diffs if rd.tag == RowTag.MODIFY]
+    assert len(modified) == 1, f"MODIFY行が {len(modified)} 件（期待値: 1）"
+    changed_cols = {cd.col_idx for cd in modified[0].cell_diffs}
+    assert 1 in changed_cols, "B列(idx=1)の差分が検出されなかった"
+    assert 0 not in changed_cols, "A列(idx=0)が誤って差分に含まれた"
+    assert 2 not in changed_cols, "除外列(idx=2)が cell_diffs に含まれた"
+
+
+def t_col_filter_row_lcs():
+    """列フィルタ: 除外列の相違がLCSに影響しない（行マッチが正しく行われる）"""
+    # 列B(idx=1)は除外（列A=idx=0のみ比較）
+    # 旧行: ["A", "X"]  新行: ["A", "Y"] → 除外列Bが違っても EQUAL
+    config = DiffConfig(global_col_filter={0})
+    result = run_diff(
+        [["A", "X"]],
+        [["A", "Y"]],
+        config=config,
+    )
+    assert not result.has_differences
+
+
+def t_col_filter_stored_in_sheet_diff():
+    """SheetDiff に col_filter が格納されている"""
+    config = DiffConfig(global_col_filter={0, 2})
+    result = run_diff(
+        [["A", "B", "C"]],
+        [["A", "B", "C"]],
+        config=config,
+    )
+    sd = result.sheet_diffs[0]
+    assert sd.col_filter == {0, 2}
+
+
+# ---------------------------------------------------------------------------
 # 文字レベルdiff テスト (_render_cell_pair_diff)
 # ---------------------------------------------------------------------------
 
@@ -433,6 +515,18 @@ if __name__ == "__main__":
     print("excel-diff ユニットテスト")
     print("=" * 50)
 
+    print("--- 列フィルタ ---")
+    test("parse_col_spec: 単一列",              t_parse_col_spec_single)
+    test("parse_col_spec: 連続範囲",            t_parse_col_spec_range)
+    test("parse_col_spec: 飛び地",              t_parse_col_spec_noncontiguous)
+    test("parse_col_spec: 混在",                t_parse_col_spec_mixed)
+    test("列フィルタ: 除外列は差分なし",         t_col_filter_excludes_diff)
+    test("列フィルタ: 対象列の差分を検出",       t_col_filter_detects_included_diff)
+    test("列フィルタ: LCSに影響しない",          t_col_filter_row_lcs)
+    test("列フィルタ: SheetDiffに格納",          t_col_filter_stored_in_sheet_diff)
+
+    print()
+    print("--- 差分エンジン ---")
     test("差分なし",                            t_no_diff)
     test("セル変更",                            t_cell_change)
     test("行挿入（中間）",                      t_row_insert)

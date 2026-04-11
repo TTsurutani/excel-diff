@@ -192,25 +192,124 @@ def _load_pairs_from_xlsx(
     return pairs
 
 
-def load_matchers(config_path: str) -> list[ColumnMatcher]:
+def parse_col_spec(spec: str) -> set[int]:
     """
-    JSONファイルからカスタムマッチャーのリストを生成して返す。
+    列範囲指定文字列を 0始まりインデックスの集合に変換する。
 
-    Parameters
+    Examples
+    --------
+    "A"       → {0}
+    "A:C"     → {0, 1, 2}
+    "A:C,E"   → {0, 1, 2, 4}
+    "A,C:E,G" → {0, 2, 3, 4, 6}
+    "1,3:5"   → {0, 2, 3, 4}   # 1始まり整数も受け付ける
+    """
+    result: set[int] = set()
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" in part:
+            left, right = part.split(":", 1)
+            result.update(range(_parse_column(left.strip()), _parse_column(right.strip()) + 1))
+        else:
+            result.add(_parse_column(part))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# DiffConfig: マッチャー + 列フィルタをまとめる設定オブジェクト
+# ---------------------------------------------------------------------------
+
+class DiffConfig:
+    """
+    diff_files() に渡す設定をまとめたクラス。
+
+    Attributes
     ----------
-    config_path:
-        マッチャー設定JSONファイルのパス
+    matchers:
+        カスタムマッチャーのリスト
+    global_col_filter:
+        全シートに適用する列フィルタ（0始まりインデックスの集合）。
+        None の場合は全列比較。
+    sheet_col_filters:
+        シート名ごとの列フィルタ。global_col_filter より優先される。
+    """
+
+    def __init__(
+        self,
+        matchers: Optional[list[ColumnMatcher]] = None,
+        global_col_filter: Optional[set[int]] = None,
+        sheet_col_filters: Optional[dict[str, set[int]]] = None,
+    ):
+        self.matchers: list[ColumnMatcher] = matchers or []
+        self.global_col_filter: Optional[set[int]] = global_col_filter
+        self.sheet_col_filters: dict[str, set[int]] = sheet_col_filters or {}
+
+    def get_col_filter(self, sheet_name: str) -> Optional[set[int]]:
+        """シート名に対応する列フィルタを返す（なければ全列）。"""
+        if sheet_name in self.sheet_col_filters:
+            return self.sheet_col_filters[sheet_name]
+        return self.global_col_filter
+
+    @property
+    def matcher_count(self) -> int:
+        return len(self.matchers)
+
+
+def load_config(config_path: str) -> DiffConfig:
+    """
+    JSONファイルから DiffConfig を生成して返す。
+
+    対応フォーマット:
+    1. 旧来の配列形式（マッチャーのみ）:
+       [ {"type": "mapping", ...}, ... ]
+
+    2. 新形式（列フィルタ + マッチャー）:
+       {
+         "include_cols": "A:C,E",
+         "sheets": {
+           "売上": { "include_cols": "A,C:F" }
+         },
+         "matchers": [ {"type": "mapping", ...} ]
+       }
     """
     base_dir = os.path.dirname(os.path.abspath(config_path))
 
     with open(config_path, encoding="utf-8") as f:
-        config = json.load(f)
+        raw = json.load(f)
 
+    # --- 旧来フォーマット（配列）への後方互換 ---
+    if isinstance(raw, list):
+        matchers = _parse_matchers(raw, base_dir)
+        return DiffConfig(matchers=matchers)
+
+    # --- 新形式（辞書）---
+    matchers = _parse_matchers(raw.get("matchers", []), base_dir)
+
+    global_filter: Optional[set[int]] = None
+    if "include_cols" in raw:
+        global_filter = parse_col_spec(str(raw["include_cols"]))
+
+    sheet_filters: dict[str, set[int]] = {}
+    for sheet_name, sheet_cfg in raw.get("sheets", {}).items():
+        if "include_cols" in sheet_cfg:
+            sheet_filters[sheet_name] = parse_col_spec(str(sheet_cfg["include_cols"]))
+
+    return DiffConfig(
+        matchers=matchers,
+        global_col_filter=global_filter,
+        sheet_col_filters=sheet_filters,
+    )
+
+
+def _parse_matchers(entries: list, base_dir: str) -> list[ColumnMatcher]:
+    """マッチャーエントリのリストを ColumnMatcher リストに変換する。"""
     matchers: list[ColumnMatcher] = []
 
-    for entry in config:
+    for entry in entries:
         col_idx = _parse_column(entry["column"])
-        sheet = entry.get("sheet")  # None = 全シート
+        sheet = entry.get("sheet")
         matcher_type = entry.get("type", "mapping")
 
         if matcher_type == "mapping":
@@ -235,3 +334,9 @@ def load_matchers(config_path: str) -> list[ColumnMatcher]:
             raise ValueError(f"未知のマッチャータイプ: {matcher_type!r}")
 
     return matchers
+
+
+# 後方互換エイリアス
+def load_matchers(config_path: str) -> list[ColumnMatcher]:
+    """後方互換用。新規コードは load_config() を使用すること。"""
+    return load_config(config_path).matchers
