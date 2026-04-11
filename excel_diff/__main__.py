@@ -56,6 +56,23 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _diff_stats(file_diff) -> tuple[int, int, int]:
+    """(削除行数, 追加行数, 変更行数) を返す。"""
+    from .diff_engine import RowTag
+    delete = sum(1 for sd in file_diff.sheet_diffs for rd in sd.row_diffs if rd.tag == RowTag.DELETE)
+    insert = sum(1 for sd in file_diff.sheet_diffs for rd in sd.row_diffs if rd.tag == RowTag.INSERT)
+    modify = sum(1 for sd in file_diff.sheet_diffs for rd in sd.row_diffs if rd.tag == RowTag.MODIFY)
+    return delete, insert, modify
+
+
+def _stats_line(delete: int, insert: int, modify: int) -> str:
+    parts = []
+    if delete: parts.append(f"削除 {delete}行")
+    if insert: parts.append(f"追加 {insert}行")
+    if modify: parts.append(f"変更 {modify}行")
+    return "、".join(parts) if parts else "行変更なし"
+
+
 def _default_output_path(new_file: str) -> str:
     stem = Path(new_file).stem
     parent = Path(new_file).parent
@@ -118,10 +135,15 @@ def _run_file_diff(args: argparse.Namespace) -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html_content)
 
+    print()
     if file_diff.has_differences:
-        print(f"差分あり → {output_path}")
+        delete, insert, modify = _diff_stats(file_diff)
+        print(f"差分なし: 0 ファイル")
+        print(f"差分あり: 1 ファイル")
+        print(f"  {Path(new_path).name}  ({_stats_line(delete, insert, modify)})  → {output_path}")
     else:
-        print(f"差分なし → {output_path}")
+        print(f"差分なし: 1 ファイル")
+        print(f"差分あり: 0 ファイル")
 
     if args.open:
         webbrowser.open(Path(output_path).resolve().as_uri())
@@ -175,13 +197,11 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
         new_path = os.path.join(new_dir, fname)
 
         if not os.path.isfile(old_path):
-            print(f"  [追加] {fname}")
             old_sheets = {}
         else:
             old_sheets = read_workbook(old_path, args.strikethrough, args.sheet)
 
         if not os.path.isfile(new_path):
-            print(f"  [削除] {fname}")
             new_sheets = {}
         else:
             new_sheets = read_workbook(new_path, args.strikethrough, args.sheet)
@@ -200,19 +220,20 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(html_content)
 
-        status = "差分あり" if file_diff.has_differences else "変更なし"
-        print(f"  [{status}] {fname} → {out_path}")
-        results.append((fname, file_diff.has_differences, out_path))
+        results.append((fname, file_diff, out_path))
 
-    diff_count = sum(1 for _, d, _ in results if d)
-    print(f"\n完了: {len(results)} ファイル比較、うち {diff_count} ファイルに差分")
+    no_diff = [r for r in results if not r[1].has_differences]
+    has_diff = [r for r in results if r[1].has_differences]
 
-    if args.open and results:
-        # 差分があった最初のファイルを開く
-        for _, has_diff, out_path in results:
-            if has_diff:
-                webbrowser.open(Path(out_path).resolve().as_uri())
-                break
+    print()
+    print(f"差分なし: {len(no_diff)} ファイル")
+    print(f"差分あり: {len(has_diff)} ファイル")
+    for fname, file_diff, out_path in has_diff:
+        delete, insert, modify = _diff_stats(file_diff)
+        print(f"  {fname}  ({_stats_line(delete, insert, modify)})  → {out_path}")
+
+    if args.open and has_diff:
+        webbrowser.open(Path(has_diff[0][2]).resolve().as_uri())
 
 
 def main() -> None:
