@@ -183,12 +183,12 @@ body {
 /* MODIFY行: 変更なしセルは白、行番号のみ黄で「変更行」を示す */
 .row-modified td                  { background: #fff; }
 .row-modified .line-num           { background: #fff5b1 !important; }
-/* 変更セル（背景） */
-.cell-old { background: #fdb8c0 !important; }
-.cell-new { background: #acf2bd !important; }
-/* 文字レベルのdiff（変更セル内の差分文字） */
-.char-del { background: #e87979; border-radius: 2px; }
-.char-new { background: #56b164; border-radius: 2px; color: #fff; }
+/* 変更セル: 背景なし（文字マークだけで差分を示す） */
+.cell-old { background: #fff !important; }
+.cell-new { background: #fff !important; }
+/* 文字レベルのdiff */
+.char-del { background: #ffc0c0; color: #8b0000; border-radius: 2px; padding: 0 1px; }
+.char-new { background: #2da44e; color: #fff;    border-radius: 2px; padding: 0 1px; }
 /* 空セル */
 .empty-side td { background: #fafafa !important; }
 /* 取り消し線 */
