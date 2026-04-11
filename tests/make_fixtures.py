@@ -143,10 +143,75 @@ def make_matcher_fixture():
     print("生成: matcher_old.xlsx / matcher_new.xlsx / matchers.json")
 
 
+def make_chartest():
+    """
+    文字レベルdiff の視覚確認用。
+    全角・半角・数値・記号など多様なパターンを網羅する。
+    """
+    # パターン: [説明, 旧値, 新値]
+    patterns = [
+        # --- 全角テキスト ---
+        ["全角: 末尾追加",           "みかん",               "みかんジュース"],
+        ["全角: 先頭追加",           "東京",                 "新東京"],
+        ["全角: 中間1文字変更",      "東京都渋谷区",         "東京都新宿区"],
+        ["全角: 大部分変更",         "東京都渋谷区恵比寿",   "神奈川県横浜市西区"],
+        ["全角: 完全置換",           "りんご",               "バナナ"],
+        ["全角: 末尾削除",           "みかんジュース",       "みかん"],
+
+        # --- 半角英数 ---
+        ["半角: 末尾1文字変更",      "ABC",                  "ABD"],
+        ["半角: 中間変更",           "商品コードA-001",      "商品コードB-001"],
+        ["半角: バージョン番号",      "v1.0.0",               "v1.2.0"],
+        ["半角: ファイルパス",        "data/2024/01.csv",     "data/2024/03.csv"],
+
+        # --- 数値 ---
+        ["数値: 1桁変更",            60,                     70],
+        ["数値: 4桁→4桁",           1200,                   1400],
+        ["数値: 桁数増加",           999,                    1000],
+        ["数値: 桁数減少",           1000,                   999],
+        ["数値: 小数",               3.14,                   3.15],
+
+        # --- 全角数字・記号 ---
+        ["全角数字変更",             "１２３",               "１２４"],
+        ["全角記号混在",             "○承認済み",            "×却下"],
+        ["括弧内変更",               "担当: 山田（東京）",   "担当: 鈴木（大阪）"],
+
+        # --- 混在・特殊 ---
+        ["半角全角混在",             "2024年1月期",          "2024年3月期"],
+        ["コード+名称",              "T001 東京支店",        "T002 大阪支店"],
+        ["空→値",                   None,                   "新規追加"],
+        ["値→空",                   "削除予定",             None],
+        ["同一値（差分なし確認）",   "変更なし",             "変更なし"],
+    ]
+
+    header = ["パターン説明", "旧値", "新値"]
+
+    # --- 旧ファイル ---
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "文字diff確認"
+    ws.append(header)
+    for desc, old, _ in patterns:
+        ws.append([desc, old, None])
+    wb.save(FIXTURES_DIR / "chartest_old.xlsx")
+
+    # --- 新ファイル ---
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "文字diff確認"
+    ws.append(header)
+    for desc, _, new in patterns:
+        ws.append([desc, None, new])
+    wb.save(FIXTURES_DIR / "chartest_new.xlsx")
+
+    print(f"生成: chartest_old.xlsx / chartest_new.xlsx ({len(patterns)} パターン)")
+
+
 if __name__ == "__main__":
     FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
     make_basic()
     make_multisheet()
     make_no_diff()
     make_matcher_fixture()
+    make_chartest()
     print(f"\nすべてのテストデータを生成しました: {FIXTURES_DIR}/")

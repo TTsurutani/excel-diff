@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from excel_diff.reader import CellData, RowData, SheetData
 from excel_diff.diff_engine import diff_files, RowTag
 from excel_diff.matcher import MappingMatcher
+from excel_diff.html_renderer import _render_cell_pair_diff
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +260,171 @@ def t_row_numbers():
 
 
 # ---------------------------------------------------------------------------
+# 文字レベルdiff テスト (_render_cell_pair_diff)
+# ---------------------------------------------------------------------------
+
+def char_diff(old_val, new_val) -> tuple[str, str]:
+    """CellData を作って _render_cell_pair_diff を呼ぶ薄いラッパー。"""
+    return _render_cell_pair_diff(CellData(old_val), CellData(new_val))
+
+
+def assert_marks(html_str: str, expected_texts: list[str], mark_class: str):
+    """expected_texts のそれぞれが <mark class="..."> で囲まれているか検証する。"""
+    for text in expected_texts:
+        tag = f'<mark class="{mark_class}">{text}</mark>'
+        assert tag in html_str, f'"{text}" が {mark_class} でマークされていない\n  actual: {html_str}'
+
+
+def assert_no_mark(html_str: str, texts: list[str]):
+    """texts のいずれも <mark> で囲まれていないことを検証する。"""
+    for text in texts:
+        assert f'<mark' not in html_str.split(text)[0].rsplit('<mark', 1)[-1] \
+               or text not in html_str, \
+            f'"{text}" が意図せずマークされている\n  actual: {html_str}'
+
+
+# --- 全角テキスト ---
+
+def t_char_zenkaku_append():
+    """全角: 末尾追加 "みかん" → "みかんジュース" """
+    old_h, new_h = char_diff("みかん", "みかんジュース")
+    assert "みかん" in old_h, "旧: 共通部分が消えた"
+    assert_marks(new_h, ["ジュース"], "char-new")
+    assert "char-del" not in old_h, "旧: 削除マークが出るはずない"
+
+
+def t_char_zenkaku_prefix():
+    """全角: 先頭追加 "東京" → "新東京" """
+    old_h, new_h = char_diff("東京", "新東京")
+    assert_marks(new_h, ["新"], "char-new")
+    assert "東京" in new_h, "新: 共通部分が消えた"
+
+
+def t_char_zenkaku_middle():
+    """全角: 中間1文字変更 "東京都渋谷区" → "東京都新宿区" """
+    old_h, new_h = char_diff("東京都渋谷区", "東京都新宿区")
+    assert_marks(old_h, ["渋谷"], "char-del")
+    assert_marks(new_h, ["新宿"], "char-new")
+    assert "東京都" in old_h and "東京都" in new_h, "共通接頭辞が消えた"
+    assert "区" in old_h and "区" in new_h, "共通接尾辞が消えた"
+
+
+def t_char_zenkaku_full_replace():
+    """全角: 完全置換 "りんご" → "バナナ" """
+    old_h, new_h = char_diff("りんご", "バナナ")
+    assert_marks(old_h, ["りんご"], "char-del")
+    assert_marks(new_h, ["バナナ"], "char-new")
+
+
+def t_char_zenkaku_trim():
+    """全角: 末尾削除 "みかんジュース" → "みかん" """
+    old_h, new_h = char_diff("みかんジュース", "みかん")
+    assert_marks(old_h, ["ジュース"], "char-del")
+    assert "char-new" not in new_h
+
+
+# --- 半角英数 ---
+
+def t_char_ascii_last():
+    """半角: 末尾1文字変更 "ABC" → "ABD" """
+    old_h, new_h = char_diff("ABC", "ABD")
+    assert_marks(old_h, ["C"], "char-del")
+    assert_marks(new_h, ["D"], "char-new")
+    assert "AB" in old_h and "AB" in new_h
+
+
+def t_char_ascii_middle():
+    """半角: 中間変更 "商品コードA-001" → "商品コードB-001" """
+    old_h, new_h = char_diff("商品コードA-001", "商品コードB-001")
+    assert_marks(old_h, ["A"], "char-del")
+    assert_marks(new_h, ["B"], "char-new")
+    assert "商品コード" in old_h
+    assert "-001" in old_h and "-001" in new_h
+
+
+def t_char_version():
+    """半角: バージョン番号 "v1.0.0" → "v1.2.0" """
+    old_h, new_h = char_diff("v1.0.0", "v1.2.0")
+    assert_marks(old_h, ["0"], "char-del")   # 2番目の0が変わる
+    assert_marks(new_h, ["2"], "char-new")
+
+
+# --- 数値 ---
+
+def t_char_number_single():
+    """数値: 1桁変更 60 → 70 """
+    old_h, new_h = char_diff(60, 70)
+    assert_marks(old_h, ["6"], "char-del")
+    assert_marks(new_h, ["7"], "char-new")
+    assert "0" in old_h and "0" in new_h
+
+
+def t_char_number_middle():
+    """数値: 4桁→4桁 1200 → 1400 """
+    old_h, new_h = char_diff(1200, 1400)
+    assert_marks(old_h, ["2"], "char-del")
+    assert_marks(new_h, ["4"], "char-new")
+    assert "1" in old_h and "00" in old_h
+
+
+def t_char_number_digit_increase():
+    """数値: 桁数増加 999 → 1000 """
+    old_h, new_h = char_diff(999, 1000)
+    # 全文字が変わる or 部分的にマークされる（どちらでも可）
+    # 重要なのは old に char-del、new に char-new が含まれること
+    assert "char-del" in old_h
+    assert "char-new" in new_h
+
+
+def t_char_float():
+    """数値: 小数 3.14 → 3.15 """
+    old_h, new_h = char_diff(3.14, 3.15)
+    assert_marks(old_h, ["4"], "char-del")
+    assert_marks(new_h, ["5"], "char-new")
+    assert "3.1" in old_h and "3.1" in new_h
+
+
+# --- 特殊ケース ---
+
+def t_char_none_to_value():
+    """空→値: None → "新規追加" """
+    old_h, new_h = char_diff(None, "新規追加")
+    assert old_h == "", f"旧: None は空文字列になるはず。actual: {old_h}"
+    assert_marks(new_h, ["新規追加"], "char-new")
+
+
+def t_char_value_to_none():
+    """値→空: "削除予定" → None """
+    old_h, new_h = char_diff("削除予定", None)
+    assert_marks(old_h, ["削除予定"], "char-del")
+    assert new_h == "", f"新: None は空文字列になるはず。actual: {new_h}"
+
+
+def t_char_same_value():
+    """同一値: 差分なし → mark タグなし """
+    old_h, new_h = char_diff("変更なし", "変更なし")
+    assert "char-del" not in old_h, "同一値なのに char-del が出た"
+    assert "char-new" not in new_h, "同一値なのに char-new が出た"
+    assert "変更なし" in old_h and "変更なし" in new_h
+
+
+def t_char_zenkaku_numbers():
+    """全角数字: "１２３" → "１２４" """
+    old_h, new_h = char_diff("１２３", "１２４")
+    assert_marks(old_h, ["３"], "char-del")
+    assert_marks(new_h, ["４"], "char-new")
+    assert "１２" in old_h and "１２" in new_h
+
+
+def t_char_mixed_date():
+    """混在: "2024年1月期" → "2024年3月期" """
+    old_h, new_h = char_diff("2024年1月期", "2024年3月期")
+    assert_marks(old_h, ["1"], "char-del")
+    assert_marks(new_h, ["3"], "char-new")
+    assert "2024年" in old_h and "月期" in old_h
+
+
+# ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
 
@@ -279,6 +445,26 @@ if __name__ == "__main__":
     test("マッチャー: 一部列のみ一致",           t_matcher_partial)
     test("マッチャー: シートスコープ",           t_matcher_sheet_scope)
     test("行番号の正確性",                      t_row_numbers)
+
+    print()
+    print("--- 文字レベルdiff ---")
+    test("全角: 末尾追加",                      t_char_zenkaku_append)
+    test("全角: 先頭追加",                      t_char_zenkaku_prefix)
+    test("全角: 中間変更",                      t_char_zenkaku_middle)
+    test("全角: 完全置換",                      t_char_zenkaku_full_replace)
+    test("全角: 末尾削除",                      t_char_zenkaku_trim)
+    test("半角: 末尾1文字変更",                 t_char_ascii_last)
+    test("半角: 中間変更",                      t_char_ascii_middle)
+    test("半角: バージョン番号",                 t_char_version)
+    test("数値: 1桁変更",                       t_char_number_single)
+    test("数値: 4桁変更",                       t_char_number_middle)
+    test("数値: 桁数増加",                      t_char_number_digit_increase)
+    test("数値: 小数",                          t_char_float)
+    test("特殊: None → 値",                    t_char_none_to_value)
+    test("特殊: 値 → None",                    t_char_value_to_none)
+    test("特殊: 同一値（markなし）",             t_char_same_value)
+    test("全角数字変更",                        t_char_zenkaku_numbers)
+    test("混在: 日付文字列",                     t_char_mixed_date)
 
     print("=" * 50)
     print(f"結果: {len(PASS)} PASS / {len(FAIL)} FAIL")
