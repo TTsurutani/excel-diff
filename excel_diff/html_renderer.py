@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import html
 from datetime import datetime
+from difflib import SequenceMatcher
 from typing import Optional
 
 from .diff_engine import FileDiff, SheetDiff, RowDiff, RowTag
@@ -179,11 +180,15 @@ body {
 .row-deleted .line-num            { background: #ffd7dc !important; }
 .row-inserted td                  { background: #e6ffed; }
 .row-inserted .line-num           { background: #ccffd8 !important; }
-.row-modified td                  { background: #fffbdd; }
+/* MODIFY行: 変更なしセルは白、行番号のみ黄で「変更行」を示す */
+.row-modified td                  { background: #fff; }
 .row-modified .line-num           { background: #fff5b1 !important; }
-/* セルハイライト（変更セル） */
+/* 変更セル（背景） */
 .cell-old { background: #fdb8c0 !important; }
 .cell-new { background: #acf2bd !important; }
+/* 文字レベルのdiff（変更セル内の差分文字） */
+.char-del { background: #e87979; border-radius: 2px; }
+.char-new { background: #56b164; border-radius: 2px; color: #fff; }
 /* 空セル */
 .empty-side td { background: #fafafa !important; }
 /* 取り消し線 */
@@ -222,6 +227,46 @@ def _render_cell_value(cell: Optional[CellData]) -> str:
     return text
 
 
+def _render_cell_pair_diff(
+    old_cell: Optional[CellData],
+    new_cell: Optional[CellData],
+) -> tuple[str, str]:
+    """
+    変更セルのペアに対して文字レベルの diff HTML を生成し
+    (old_html, new_html) を返す。
+    """
+    old_str = str(old_cell.value) if (old_cell and old_cell.value is not None) else ""
+    new_str = str(new_cell.value) if (new_cell and new_cell.value is not None) else ""
+
+    old_parts: list[str] = []
+    new_parts: list[str] = []
+
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, old_str, new_str, autojunk=False).get_opcodes():
+        oc = _e(old_str[i1:i2])
+        nc = _e(new_str[j1:j2])
+        if tag == "equal":
+            old_parts.append(oc)
+            new_parts.append(nc)
+        elif tag == "delete":
+            old_parts.append(f'<mark class="char-del">{oc}</mark>')
+        elif tag == "insert":
+            new_parts.append(f'<mark class="char-new">{nc}</mark>')
+        elif tag == "replace":
+            old_parts.append(f'<mark class="char-del">{oc}</mark>')
+            new_parts.append(f'<mark class="char-new">{nc}</mark>')
+
+    old_html = "".join(old_parts)
+    new_html = "".join(new_parts)
+
+    # 取り消し線を外側でラップ
+    if old_cell and old_cell.strikethrough:
+        old_html = f'<span class="strike">{old_html}</span>'
+    if new_cell and new_cell.strikethrough:
+        new_html = f'<span class="strike">{new_html}</span>'
+
+    return old_html, new_html
+
+
 def _render_row(row_diff: RowDiff, max_cols: int) -> str:
     tag = row_diff.tag
     css_class = {
@@ -231,10 +276,17 @@ def _render_row(row_diff: RowDiff, max_cols: int) -> str:
         RowTag.MODIFY: "row-modified",
     }[tag]
 
-    changed_cols = {cd.col_idx for cd in row_diff.cell_diffs}
+    # 変更セルを {col_idx: CellDiff} で引けるように
+    changed: dict[int, object] = {cd.col_idx: cd for cd in row_diff.cell_diffs}
 
     old_ln = str(row_diff.old_row.row_idx) if row_diff.old_row else ""
     new_ln = str(row_diff.new_row.row_idx) if row_diff.new_row else ""
+
+    # MODIFY行の変更セルは文字diffを事前計算
+    char_diffs: dict[int, tuple[str, str]] = {}
+    if tag == RowTag.MODIFY:
+        for col_idx, cd in changed.items():
+            char_diffs[col_idx] = _render_cell_pair_diff(cd.old_cell, cd.new_cell)
 
     # 旧側セル
     if row_diff.old_row:
@@ -242,8 +294,11 @@ def _render_row(row_diff: RowDiff, max_cols: int) -> str:
         old_tds = ""
         for i in range(max_cols):
             cell = cells[i] if i < len(cells) else None
-            css = ' class="cell-old"' if i in changed_cols else ""
-            old_tds += f"<td{css}>{_render_cell_value(cell)}</td>"
+            if i in changed:
+                content = char_diffs[i][0] if char_diffs else _render_cell_value(cell)
+                old_tds += f'<td class="cell-old">{content}</td>'
+            else:
+                old_tds += f"<td>{_render_cell_value(cell)}</td>"
     else:
         old_tds = f'<td class="empty-side" colspan="{max_cols}"></td>'
 
@@ -253,8 +308,11 @@ def _render_row(row_diff: RowDiff, max_cols: int) -> str:
         new_tds = ""
         for i in range(max_cols):
             cell = cells[i] if i < len(cells) else None
-            css = ' class="cell-new"' if i in changed_cols else ""
-            new_tds += f"<td{css}>{_render_cell_value(cell)}</td>"
+            if i in changed:
+                content = char_diffs[i][1] if char_diffs else _render_cell_value(cell)
+                new_tds += f'<td class="cell-new">{content}</td>'
+            else:
+                new_tds += f"<td>{_render_cell_value(cell)}</td>"
     else:
         new_tds = f'<td class="empty-side" colspan="{max_cols}"></td>'
 
