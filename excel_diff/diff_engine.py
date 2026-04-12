@@ -78,15 +78,15 @@ def _normalize_val(v: Any) -> Any:
     """
     セル値を比較用に正規化する。
     - None と空文字列は同一視（None に統一）
-    - テキスト埋め込みの 'x000D' を除去
+    - '_x000D_' 形式のテキスト埋め込み CR 表現を除去
     - CR+LF / CR のみ → LF に統一（改行コード差異を吸収）
     """
     if v is None:
         return None
     if isinstance(v, str):
-        v = re.sub(r'[xX]000[dD]', '', v)  # テキスト表現の x000D を除去
-        v = v.replace('\r\n', '\n')          # CRLF → LF
-        v = v.replace('\r', '\n')            # CR のみ → LF
+        v = re.sub(r'_?[xX]000[dD]_?', '', v)  # _x000D_ または x000D を除去
+        v = v.replace('\r\n', '\n')               # CRLF → LF
+        v = v.replace('\r', '\n')                 # CR のみ → LF
     return None if v == "" else v
 
 

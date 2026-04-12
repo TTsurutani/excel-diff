@@ -402,7 +402,8 @@ def _e(text) -> str:
 
 def _strip_ctrl(v) -> str:
     """改行コードを正規化し、制御コードを除去して文字列化する。
-    - テキスト埋め込みの 'x000D' / 'x000d' を削除
+    - '_x000D_' 形式のテキスト埋め込み CR 表現を除去（Excel の XLSX 内部表現）
+    - 単体の 'x000D' / 'x000d' も念のため除去
     - CR+LF (\\r\\n) → LF (\\n) に統一
     - 単独 CR (\\r) → LF (\\n) に統一
     これにより旧ファイルと新ファイルの改行コード差異を吸収する。
@@ -410,9 +411,9 @@ def _strip_ctrl(v) -> str:
     if v is None:
         return ""
     s = str(v)
-    s = re.sub(r'[xX]000[dD]', '', s)  # テキスト表現の x000D を除去
-    s = s.replace('\r\n', '\n')         # CRLF → LF
-    s = s.replace('\r', '\n')           # CR のみ → LF
+    s = re.sub(r'_?[xX]000[dD]_?', '', s)  # _x000D_ または x000D を除去
+    s = s.replace('\r\n', '\n')              # CRLF → LF
+    s = s.replace('\r', '\n')               # CR のみ → LF
     return s
 
 
