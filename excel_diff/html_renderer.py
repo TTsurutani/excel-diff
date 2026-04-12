@@ -184,22 +184,18 @@ body {
 
 /* スクロール可能なパネル本体 */
 .panel {
-  overflow: auto;
+  overflow-x: auto;   /* 水平スクロールを明示（カスタムCSS定義時に auto だと消える場合がある） */
+  overflow-y: auto;
   border-right: 1px solid #d0d7de;
   min-height: 0;
 }
 .panel:last-child { border-right: none; }
 
-/* ─── カスタムスクロールバー（垂直と同幅に拡大） ─── */
-.panel::-webkit-scrollbar        { width: 12px; height: 12px; }
-.panel::-webkit-scrollbar-track  { background: #f1f1f1; }
-.panel::-webkit-scrollbar-thumb  {
-  background: #bbb;
-  border-radius: 6px;
-  border: 2px solid #f1f1f1;
-}
-.panel::-webkit-scrollbar-thumb:hover   { background: #888; }
-.panel::-webkit-scrollbar-corner        { background: #f1f1f1; }
+/* ─── カスタムスクロールバー（水平バーを太くして操作しやすく） ─── */
+.panel::-webkit-scrollbar         { width: 10px; height: 12px; }
+.panel::-webkit-scrollbar-track   { background: #ebebeb; }
+.panel::-webkit-scrollbar-thumb   { background: #b0b0b0; border-radius: 6px; }
+.panel::-webkit-scrollbar-thumb:hover { background: #707070; }
 
 /* ─── diff テーブル ─── */
 .diff-table {
@@ -437,6 +433,7 @@ function removeFreezeColumns() {
 // ── ページ読み込み後に行高さを均一化 ────────────────────────────────────
 window.addEventListener('load', function() {
   equalizeRowHeights();
+  toggleEqual();   // デフォルトで「変更行のみ表示」
 });
 """
 
