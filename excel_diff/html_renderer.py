@@ -165,7 +165,6 @@ body {
   flex-direction: row;
   min-height: 300px;
   max-height: calc(100vh - 80px);
-  overflow: hidden;
 }
 
 /* タイトル＋パネルを縦に並べるラッパー */
@@ -175,7 +174,6 @@ body {
   display: flex;
   flex-direction: column;
   border-right: 1px solid #d0d7de;
-  overflow: hidden;   /* ラッパー自体はクリップ、スクロールは.panelが担う */
 }
 .panel-wrapper:last-child { border-right: none; }
 
@@ -196,14 +194,12 @@ body {
 .panel {
   flex: 1;
   min-height: 0;
-  overflow: auto;     /* 水平・垂直ともスクロール */
+  overflow: auto;
+  /* webkit-scrollbarは祖先のoverflow:hiddenと干渉しスクロールバーが消えるため使わない */
+  /* 標準仕様のscrollbar-widthでスクロールバーサイズを確保（Chrome121+/Firefox/Edge対応） */
+  scrollbar-width: auto;
+  scrollbar-color: #b0b0b0 #ebebeb;
 }
-
-/* ─── カスタムスクロールバー ─── */
-.panel::-webkit-scrollbar         { width: 10px; height: 12px; }
-.panel::-webkit-scrollbar-track   { background: #ebebeb; }
-.panel::-webkit-scrollbar-thumb   { background: #b0b0b0; border-radius: 6px; }
-.panel::-webkit-scrollbar-thumb:hover { background: #707070; }
 
 /* ─── diff テーブル ─── */
 .diff-table {
