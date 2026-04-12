@@ -118,6 +118,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="比較対象列（例: A:C,E）。省略時は全列比較")
     p.add_argument("--open", action="store_true",
                    help="生成後にブラウザで自動オープン")
+    p.add_argument("--key-cols", metavar="SPEC",
+                   help="キーJOIN差分モードのキー列（例: B,C）。指定するだけで key モードが有効になる")
+    p.add_argument("--diff-mode", choices=["lcs", "key"], default=None,
+                   help="差分モード: lcs（出現順LCS、デフォルト）または key（キーJOIN）")
     return p
 
 
@@ -150,7 +154,7 @@ def _stats_line(delete: int, insert: int, modify: int) -> str:
 
 def _build_config(args: argparse.Namespace):
     """引数から DiffConfig を組み立てて返す。"""
-    from .matcher import load_config, DiffConfig, parse_col_spec
+    from .matcher import load_config, DiffConfig, parse_col_spec, parse_col_list
 
     if args.matchers:
         if not os.path.isfile(args.matchers):
@@ -163,6 +167,23 @@ def _build_config(args: argparse.Namespace):
 
     if args.include_cols:
         config.global_col_filter = parse_col_spec(args.include_cols)
+
+    # --key-cols が指定された場合は自動的に key モードへ
+    if args.key_cols:
+        config.key_cols = parse_col_list(args.key_cols)
+        config.diff_mode = "key"
+
+    # --diff-mode が明示指定された場合はそちらを優先
+    if args.diff_mode:
+        config.diff_mode = args.diff_mode
+
+    if config.diff_mode == "key":
+        if not config.key_cols:
+            print("エラー: --diff-mode key を使うには --key-cols でキー列を指定してください", file=sys.stderr)
+            sys.exit(1)
+        from openpyxl.utils import get_column_letter
+        cols_disp = ", ".join(get_column_letter(c + 1) for c in config.key_cols)
+        print(f"差分モード: key JOIN  キー列: {cols_disp}")
 
     return config
 

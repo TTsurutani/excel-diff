@@ -240,6 +240,104 @@ def _compute_cell_diffs(
 # メイン差分ロジック
 # ---------------------------------------------------------------------------
 
+def _diff_sheet_rows_by_key(
+    sheet_name: str,
+    rows_a: list[RowData],
+    rows_b: list[RowData],
+    max_cols: int,
+    matchers: list[ColumnMatcher],
+    include_strike: bool,
+    col_filter: Optional[set[int]],
+    key_cols: list[int],
+) -> list[RowDiff]:
+    """
+    指定されたキー列で行を JOIN し、差分を計算して RowDiff のリストを返す。
+
+    - old有・new有 → セル単位比較 → EQUAL or MODIFY
+    - old有・new無 → DELETE
+    - old無・new有 → INSERT
+    - 表示順は old の行番号順を基準とし、old に存在しないキーを末尾に追加
+    - キー値に None を含む行（空キー行）は末尾で LCS にフォールバック
+    """
+    if not key_cols:
+        # キー列が未指定の場合は LCS にフォールバック
+        return _diff_sheet_rows(
+            sheet_name, rows_a, rows_b, max_cols, matchers, include_strike, col_filter
+        )
+
+    key_max = max(key_cols) + 1
+
+    def get_key(row: RowData) -> tuple:
+        cells = _pad_cells(row.cells, max(max_cols, key_max))
+        return tuple(
+            _normalize_val(cells[i].value) if i < len(cells) else None
+            for i in key_cols
+        )
+
+    def is_empty_key(key: tuple) -> bool:
+        return any(v is None for v in key)
+
+    # old / new それぞれをキー付き・空キーに分類
+    # キー重複があった場合は最初の行を採用（後続はそのまま空キー扱いとして末尾処理）
+    old_keyed: dict[tuple, RowData] = {}
+    old_null: list[RowData] = []
+    old_key_order: list[tuple] = []   # old の出現順を保持
+    for row in rows_a:
+        key = get_key(row)
+        if is_empty_key(key):
+            old_null.append(row)
+        elif key not in old_keyed:
+            old_keyed[key] = row
+            old_key_order.append(key)
+        else:
+            old_null.append(row)   # キー重複行は末尾 LCS へ
+
+    new_keyed: dict[tuple, RowData] = {}
+    new_null: list[RowData] = []
+    for row in rows_b:
+        key = get_key(row)
+        if is_empty_key(key):
+            new_null.append(row)
+        elif key not in new_keyed:
+            new_keyed[key] = row
+        else:
+            new_null.append(row)   # キー重複行は末尾 LCS へ
+
+    # 全キー = old の出現順 ∪ new にしかないキー（末尾に追加）
+    all_keys = list(old_key_order)
+    for k in new_keyed:
+        if k not in old_keyed:
+            all_keys.append(k)
+
+    result: list[RowDiff] = []
+    for key in all_keys:
+        old_row = old_keyed.get(key)
+        new_row = new_keyed.get(key)
+
+        if old_row is not None and new_row is not None:
+            cell_diffs = _compute_cell_diffs(
+                old_row, new_row, max_cols, sheet_name, matchers, include_strike, col_filter
+            )
+            if cell_diffs:
+                result.append(RowDiff(RowTag.MODIFY, old_row, new_row, cell_diffs))
+            else:
+                result.append(RowDiff(RowTag.EQUAL, old_row, new_row))
+        elif old_row is not None:
+            result.append(RowDiff(RowTag.DELETE, old_row, None))
+        else:
+            result.append(RowDiff(RowTag.INSERT, None, new_row))
+
+    # 空キー行・キー重複行は LCS でフォールバック処理
+    if old_null or new_null:
+        result.extend(
+            _diff_sheet_rows(
+                sheet_name, old_null, new_null, max_cols, matchers, include_strike, col_filter
+            )
+        )
+
+    return result
+
+
 def _diff_sheet_rows(
     sheet_name: str,
     rows_a: list[RowData],
@@ -326,9 +424,13 @@ def diff_files(
     if config is not None:
         effective_matchers = config.matchers
         get_col_filter = config.get_col_filter
+        diff_mode = getattr(config, "diff_mode", "lcs")
+        key_cols   = getattr(config, "key_cols",   [])
     else:
         effective_matchers = matchers or []
         get_col_filter = lambda _sheet: None  # noqa: E731
+        diff_mode = "lcs"
+        key_cols  = []
 
     result = FileDiff(
         old_path=old_path,
@@ -362,15 +464,27 @@ def diff_files(
             col_letters = [get_column_letter(i) for i in range(1, max_cols + 1)]
             sheet_matchers = [m for m in effective_matchers if m.sheet is None or m.sheet == name]
 
-            row_diffs = _diff_sheet_rows(
-                name,
-                list(old_s.rows),
-                list(new_s.rows),
-                max_cols,
-                sheet_matchers,
-                include_strike,
-                col_filter,
-            )
+            if diff_mode == "key" and key_cols:
+                row_diffs = _diff_sheet_rows_by_key(
+                    name,
+                    list(old_s.rows),
+                    list(new_s.rows),
+                    max_cols,
+                    sheet_matchers,
+                    include_strike,
+                    col_filter,
+                    key_cols,
+                )
+            else:
+                row_diffs = _diff_sheet_rows(
+                    name,
+                    list(old_s.rows),
+                    list(new_s.rows),
+                    max_cols,
+                    sheet_matchers,
+                    include_strike,
+                    col_filter,
+                )
             has_diff = any(rd.tag != RowTag.EQUAL for rd in row_diffs)
             status = "modified" if has_diff else "equal"
             result.sheet_diffs.append(SheetDiff(name, status, row_diffs, max_cols, col_letters, col_filter))

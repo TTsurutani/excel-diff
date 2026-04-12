@@ -217,8 +217,27 @@ def parse_col_spec(spec: str) -> set[int]:
     return result
 
 
+def parse_col_list(spec: str) -> list[int]:
+    """
+    列指定文字列を 0始まりインデックスの **順序付きリスト** に変換する。
+    key_cols のように列の順序が複合キーの構成順に影響する場合に使う。
+
+    Examples
+    --------
+    "B,C"   → [1, 2]
+    "C,B"   → [2, 1]   # 指定順を保持
+    "B"     → [1]
+    """
+    result: list[int] = []
+    for part in spec.split(","):
+        part = part.strip()
+        if part:
+            result.append(_parse_column(part))
+    return result
+
+
 # ---------------------------------------------------------------------------
-# DiffConfig: マッチャー + 列フィルタをまとめる設定オブジェクト
+# DiffConfig: マッチャー + 列フィルタ + 差分モードをまとめる設定オブジェクト
 # ---------------------------------------------------------------------------
 
 class DiffConfig:
@@ -234,6 +253,13 @@ class DiffConfig:
         None の場合は全列比較。
     sheet_col_filters:
         シート名ごとの列フィルタ。global_col_filter より優先される。
+    diff_mode:
+        差分計算モード。"lcs"（デフォルト）または "key"。
+        "key" の場合は key_cols で指定した列をキーとして行を JOIN する。
+    key_cols:
+        キー JOIN モード時の複合キー列（0始まりインデックスのリスト）。
+        指定順がキーの構成順に対応する（例: [1, 2] → B列・C列の複合キー）。
+        diff_mode が "lcs" のときは無視される。
     """
 
     def __init__(
@@ -241,10 +267,14 @@ class DiffConfig:
         matchers: Optional[list[ColumnMatcher]] = None,
         global_col_filter: Optional[set[int]] = None,
         sheet_col_filters: Optional[dict[str, set[int]]] = None,
+        diff_mode: str = "lcs",
+        key_cols: Optional[list[int]] = None,
     ):
         self.matchers: list[ColumnMatcher] = matchers or []
         self.global_col_filter: Optional[set[int]] = global_col_filter
         self.sheet_col_filters: dict[str, set[int]] = sheet_col_filters or {}
+        self.diff_mode: str = diff_mode          # "lcs" or "key"
+        self.key_cols: list[int] = key_cols or []
 
     def get_col_filter(self, sheet_name: str) -> Optional[set[int]]:
         """シート名に対応する列フィルタを返す（なければ全列）。"""
@@ -296,10 +326,22 @@ def load_config(config_path: str) -> DiffConfig:
         if "include_cols" in sheet_cfg:
             sheet_filters[sheet_name] = parse_col_spec(str(sheet_cfg["include_cols"]))
 
+    # diff_mode / key_cols
+    diff_mode: str = raw.get("diff_mode", "lcs")
+    key_cols: list[int] = []
+    if "key_cols" in raw:
+        raw_keys = raw["key_cols"]
+        if isinstance(raw_keys, str):
+            key_cols = parse_col_list(raw_keys)
+        elif isinstance(raw_keys, list):
+            key_cols = [_parse_column(c) for c in raw_keys]
+
     return DiffConfig(
         matchers=matchers,
         global_col_filter=global_filter,
         sheet_col_filters=sheet_filters,
+        diff_mode=diff_mode,
+        key_cols=key_cols,
     )
 
 
