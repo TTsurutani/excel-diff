@@ -74,8 +74,16 @@ def _pad_cells(cells: list[CellData], target_len: int) -> list[CellData]:
 
 
 def _normalize_val(v: Any) -> Any:
-    """None と空文字列を同一視する（どちらも None に正規化）。"""
-    return None if (v is None or v == "") else v
+    """
+    セル値を比較用に正規化する。
+    - None と空文字列は同一視（None に統一）
+    - 文字列中の制御コード（\\r など）を除去
+    """
+    if v is None:
+        return None
+    if isinstance(v, str):
+        v = v.replace('\r', '')   # CR (\x000D) を除去
+    return None if v == "" else v
 
 
 def _cell_equal(

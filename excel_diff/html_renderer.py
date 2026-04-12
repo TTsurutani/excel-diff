@@ -251,7 +251,16 @@ body {
 # ---------------------------------------------------------------------------
 
 _JS = """
-// ── 垂直スクロール同期（水平は独立スクロール） ──────────────────────────
+// ── スクロール同期（垂直は常時、水平はトグル） ──────────────────────────
+var _hSyncEnabled = true;
+
+function toggleHSync() {
+  _hSyncEnabled = !_hSyncEnabled;
+  var btn = document.getElementById('btnHSync');
+  btn.textContent = _hSyncEnabled ? '水平同期 ON' : '水平同期 OFF';
+  btn.style.background = _hSyncEnabled ? '#ddf4ff' : '';
+}
+
 document.querySelectorAll('.panel-pair').forEach(function(pair) {
   var panels = pair.querySelectorAll('.panel');
   if (panels.length < 2) return;
@@ -259,12 +268,14 @@ document.querySelectorAll('.panel-pair').forEach(function(pair) {
   var syncing = false;
   left.addEventListener('scroll', function() {
     if (syncing) return; syncing = true;
-    right.scrollTop = left.scrollTop;   // 垂直のみ同期
+    right.scrollTop = left.scrollTop;                          // 垂直は常時同期
+    if (_hSyncEnabled) right.scrollLeft = left.scrollLeft;    // 水平はトグル制御
     syncing = false;
   });
   right.addEventListener('scroll', function() {
     if (syncing) return; syncing = true;
-    left.scrollTop = right.scrollTop;   // 垂直のみ同期
+    left.scrollTop = right.scrollTop;                         // 垂直は常時同期
+    if (_hSyncEnabled) left.scrollLeft = right.scrollLeft;   // 水平はトグル制御
     syncing = false;
   });
 });
@@ -388,10 +399,18 @@ def _e(text) -> str:
     return html.escape(str(text) if text is not None else "")
 
 
+def _strip_ctrl(v) -> str:
+    """制御コード（\r など）を除去して文字列化する。"""
+    if v is None:
+        return ""
+    s = str(v)
+    return s.replace('\r', '')   # \x000D (CR) などを除去
+
+
 def _render_cell_value(cell: Optional[CellData]) -> str:
     if cell is None or cell.value is None:
         return ""
-    text = _e(cell.value)
+    text = _e(_strip_ctrl(cell.value))
     if cell.strikethrough:
         text = f'<span class="strike">{text}</span>'
     return text
@@ -402,8 +421,8 @@ def _render_cell_pair_diff(
     new_cell: Optional[CellData],
 ) -> tuple[str, str]:
     """変更セルのペアに対して文字レベル diff HTML を生成し (old_html, new_html) を返す。"""
-    old_str = str(old_cell.value) if (old_cell and old_cell.value is not None) else ""
-    new_str = str(new_cell.value) if (new_cell and new_cell.value is not None) else ""
+    old_str = _strip_ctrl(old_cell.value) if old_cell else ""
+    new_str = _strip_ctrl(new_cell.value) if new_cell else ""
 
     old_parts: list[str] = []
     new_parts: list[str] = []
@@ -649,6 +668,7 @@ def render(file_diff: FileDiff) -> str:
     <button class="btn" id="btnToggleEqual" data-showing="true" onclick="toggleEqual()">変更行のみ表示</button>
     <button class="btn" id="btnToggleLayout" data-layout="horizontal" onclick="toggleLayout()">上下表示に切替</button>
     <button class="btn" id="btnFreezeCol" onclick="toggleFreezeColumns()">先頭3列を固定</button>
+    <button class="btn" id="btnHSync" style="background:#ddf4ff" onclick="toggleHSync()">水平同期 ON</button>
   </span>
 </div>
 <div class="sheets-container">
