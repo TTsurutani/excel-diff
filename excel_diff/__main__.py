@@ -20,6 +20,10 @@ excel-diff CLI エントリポイント。
 
   # パターン一覧
   python -m excel_diff --list-patterns
+
+  # ブックをシート単位に分解
+  python -m excel_diff --split book.xlsx --prefix "2024_"
+  python -m excel_diff --split book.xlsx --suffix "_output" --output-dir out/
 """
 from __future__ import annotations
 
@@ -88,6 +92,14 @@ def _build_parser() -> argparse.ArgumentParser:
     # --- パターン一覧 ---
     p.add_argument("--list-patterns", action="store_true",
                    help="保存済みパターンを一覧表示")
+
+    # --- ブック分解 ---
+    p.add_argument("--split", metavar="FILE",
+                   help="Excelブックをシート単位のファイルに分解する")
+    p.add_argument("--prefix", metavar="TEXT", default="",
+                   help="--split: 出力ファイル名の前置文字列")
+    p.add_argument("--suffix", metavar="TEXT", default="",
+                   help="--split: 出力ファイル名の後置文字列（拡張子の前）")
 
     # --- パターン指定（フォルダ比較時） ---
     p.add_argument("--pattern", metavar="ID",
@@ -329,6 +341,39 @@ def _run_list_patterns(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# ブック分解
+# ---------------------------------------------------------------------------
+
+def _run_split(args: argparse.Namespace) -> None:
+    from .splitter import split_workbook
+
+    path = args.split
+    if not os.path.isfile(path):
+        print(f"エラー: ファイルが見つかりません: {path}", file=sys.stderr)
+        sys.exit(1)
+    if not path.lower().endswith(".xlsx"):
+        print(f"エラー: .xlsx ファイルを指定してください: {path}", file=sys.stderr)
+        sys.exit(1)
+
+    prefix = args.prefix
+    suffix = args.suffix
+    output_dir = args.output_dir  # None の場合はブックと同フォルダ
+
+    print(f"分解中: {path}")
+    if prefix:
+        print(f"  前置: {prefix}")
+    if suffix:
+        print(f"  後置: {suffix}")
+
+    output_paths = split_workbook(path, prefix=prefix, suffix=suffix, output_dir=output_dir)
+
+    print()
+    print(f"{len(output_paths)} シートを分解しました:")
+    for p in output_paths:
+        print(f"  → {p}")
+
+
+# ---------------------------------------------------------------------------
 # ファイル比較
 # ---------------------------------------------------------------------------
 
@@ -497,7 +542,9 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
-    if args.discover:
+    if args.split:
+        _run_split(args)
+    elif args.discover:
         _run_discover(args)
     elif args.gen_pattern:
         _run_gen_pattern(args)

@@ -24,15 +24,20 @@ excel_diff/
 ├── reader.py            Excelファイル読込
 ├── matcher.py           カスタムマッチャー・列フィルタ定義
 ├── diff_engine.py       差分アルゴリズム
-└── html_renderer.py     HTML出力
+├── html_renderer.py     HTML出力
+├── file_pairing.py      ファイルペアリング（discover / 正規表現生成・検証 / パターン適用）
+├── patterns.py          パターン定義の永続化（PatternStore / patterns.json）
+└── splitter.py          ブックをシート単位ファイルに分解
 
 tests/
 ├── make_fixtures.py     テスト用Excelファイル生成
 └── test_diff.py         ユニットテスト（37件）
 
 SPEC.md
+README.md
 requirements.txt         依存ライブラリ（openpyxlのみ）
 build.bat                PyInstallerビルドスクリプト
+patterns.json            保存済みパターン定義（ユーザー作成）
 ```
 
 ---
@@ -51,22 +56,100 @@ excel-diff.exe <旧ファイル.xlsx> <新ファイル.xlsx> [オプション]
 excel-diff.exe --dir <旧フォルダ> <新フォルダ> [オプション]
 ```
 
-両フォルダ内の同名xlsxファイルを検索し、それぞれ比較する。
-片方にしか存在しないファイルも「追加」「削除」として報告する。
+両フォルダ内のxlsxファイルをペアリングして比較する。
+デフォルトはファイル名の完全一致でペアリング。`--pattern` 指定時は保存済みパターンを使用。
+片方にしか存在しないファイル（またはパターン未マッチファイル）は「比較対象外」としてコンソールに報告する。
 
-### 4-3. オプション
+### 4-3. ペアリング候補の探索
+
+```
+excel-diff.exe --discover <旧フォルダ> <新フォルダ> [-o pairs.json] [--threshold 0.6]
+```
+
+類似度スコアでペア候補を探索し、JSONに保存する（人手で確認・修正するためのたたき台）。
+
+### 4-4. パターンの生成・保存
+
+```
+excel-diff.exe --gen-pattern pairs.json --id <ID> --name <名前> [--regex <正規表現>]
+```
+
+確認済みペアJSONから `key_regex` を自動生成し `patterns.json` に保存する。
+自動生成に失敗した場合は `--regex` で正規表現を手動指定できる（その場合も検証を実行）。
+
+### 4-5. パターン一覧表示
+
+```
+excel-diff.exe --list-patterns [--patterns-file FILE]
+```
+
+### 4-6. ブックのシート分解
+
+```
+excel-diff.exe --split <ブック.xlsx> [--prefix TEXT] [--suffix TEXT] [--output-dir DIR]
+```
+
+1つのブックを「1シート = 1ファイル」に分解する。
+出力ファイル名は `<prefix><シート名><suffix>.xlsx`。
+シート名にファイル名不正文字（`\ / : * ? " < > |`）が含まれる場合は `_` に置換する。
+
+### 4-7. オプション一覧
+
+**ファイル比較・フォルダ比較**
 
 | オプション | 説明 | デフォルト |
 |---|---|---|
 | `-o`, `--output PATH` | 出力HTMLファイルパス | `<新ファイル名>_diff.html` |
 | `--output-dir DIR` | フォルダ比較時の出力先フォルダ | `<旧フォルダ>_vs_<新フォルダ>/` |
+| `--pattern ID` | フォルダ比較時のペアリングパターンID | なし（完全一致） |
+| `--patterns-file FILE` | パターン定義ファイルのパス | `patterns.json` |
 | `--sheet NAME` | 比較対象シートを絞り込み | 全シート |
 | `--strikethrough` | 取り消し線の有無も差分として扱う | 無効（値のみ比較） |
 | `--matchers FILE` | カスタムマッチャー／列フィルタ設定JSONファイル | なし |
 | `--include-cols SPEC` | 比較対象列の指定（例: `A:C,E`） | 全列比較 |
 | `--open` | 生成後にブラウザで自動オープン | 無効 |
 
-### 4-4. VBAからの呼び出し例
+**ペアリングパターン管理**
+
+| オプション | 説明 |
+|---|---|
+| `--discover OLD NEW` | ファイルペア候補を探索してJSONに保存 |
+| `--threshold SCORE` | `--discover` の類似度しきい値（0〜1） デフォルト: 0.6 |
+| `--gen-pattern FILE` | 確認済みペアJSONからパターンを生成・保存 |
+| `--id ID` | `--gen-pattern`: パターンID |
+| `--name NAME` | `--gen-pattern`: パターン名 |
+| `--regex REGEX` | `--gen-pattern`: 正規表現を手動指定 |
+| `--list-patterns` | 保存済みパターンを一覧表示 |
+
+**ブック分解**
+
+| オプション | 説明 | デフォルト |
+|---|---|---|
+| `--split FILE` | 分解するブックのパス | — |
+| `--prefix TEXT` | 出力ファイル名の前置文字列 | なし |
+| `--suffix TEXT` | 出力ファイル名の後置文字列（拡張子の前） | なし |
+| `--output-dir DIR` | 出力先フォルダ | ブックと同フォルダ |
+
+### 4-8. コンソール出力形式
+
+**ファイル比較**
+
+```
+差分あり: sales.xlsx  (削除 1行、追加 2行、変更 3行)  → result.html
+```
+
+**フォルダ比較**
+
+```
+差分なし: 1 ファイル
+差分あり: 2 ファイル
+  sales.xlsx      (削除 1行、追加 2行、変更 3行)  → diffs\sales_diff.html
+  inventory.xlsx  (削除 0行、追加 1行、変更 0行)  → diffs\inventory_diff.html
+比較対象外: 1 ファイル
+  [旧のみ] archive.xlsx
+```
+
+### 4-9. VBAからの呼び出し例
 
 ```vba
 Dim wsh As Object
@@ -294,13 +377,20 @@ MODIFY行のセル比較時、対象列にマッチャーが適用され `True` 
 - ヘッダ: 比較ファイルパス・比較日時
 - ナビゲーション: シート名リンク（変更ステータス付き）
 - サマリ: 変更シート数・変更行数の統計・マッチャー適用件数
-- 各シートのdiffテーブル（サイドバイサイド表示）
+- 各シートのdiffテーブル（サイドバイサイド表示または上下表示）
 
 ### 8-2. 表示形式
+
+**サイドバイサイド（デフォルト）**
 
 ```
 行番号 | 旧ファイルのセル列... | （区切り） | 行番号 | 新ファイルのセル列...
 ```
+
+**上下表示（列数が多い場合向け）**
+
+MODIFY行は「旧行（薄赤）→ 新行（薄緑）」の2行で表示する。
+DELETE/INSERT は1行で表示。EQUAL は旧値1行で表示。
 
 列ヘッダ（A, B, C...）を1行目に表示。
 
@@ -311,7 +401,9 @@ MODIFY行のセル比較時、対象列にマッチャーが適用され `True` 
 | 変更なし行（EQUAL） | 白背景 |
 | 削除行（DELETE） | 全セル薄赤（`#ffeef0`） |
 | 追加行（INSERT） | 全セル薄緑（`#e6ffed`） |
-| 変更行（MODIFY） | 行番号のみ黄（`#fff5b1`）、セルは白背景 |
+| 変更行（MODIFY）/ SBS | 行番号のみ黄（`#fff5b1`）、セルは白背景 |
+| 変更行（MODIFY）/ 上下・旧行 | 全セル薄赤（`#ffeef0`） |
+| 変更行（MODIFY）/ 上下・新行 | 全セル薄緑（`#e6ffed`） |
 | 変更セルの削除文字 | `<mark class="char-del">` 赤マーク（`#ffc0c0`） |
 | 変更セルの追加文字 | `<mark class="char-new">` 緑マーク（`#2da44e`） |
 | 比較除外列 | グレー文字・グレー背景（`.cell-excluded`） |
@@ -319,6 +411,9 @@ MODIFY行のセル比較時、対象列にマッチャーが適用され `True` 
 ### 8-4. 機能
 
 - 「変更行のみ表示」トグルボタン（JavaScriptで EQUAL行の表示/非表示）
+- 「上下表示に切り替え」ボタン（`.view-sbs` と `.view-stacked` を `display:none` で切り替え）
+  - 両ビューはHTML生成時に同時にレンダリングされ、JSで表示/非表示を切り替える
+  - ボタンラベルはビュー切り替えに合わせて「サイドバイサイドに戻す」↔「上下表示に切り替え」と変化
 - カスタムマッチャー使用時はサマリに「カスタムマッチャー: ○件適用」と表示
 - 文字エンコーディング: UTF-8
 
@@ -382,11 +477,105 @@ FileDiff
   sheet_diffs: list[SheetDiff]
   has_differences: bool
   matcher_count: int        適用されたマッチャー数
+
+FilePair                    （file_pairing.py）
+  old_name: Optional[str]   旧フォルダ内ファイル名（Noneは新規追加ファイル）
+  new_name: Optional[str]   新フォルダ内ファイル名（Noneは削除ファイル）
+  score: float              類似度スコア（0.0〜1.0）
+  matched_by: str           'exact' | 'pattern' | 'auto' | 'unmatched_old' | 'unmatched_new'
+
+ValidationError             （file_pairing.py）
+  kind: str                 'no_match' | 'key_mismatch' | 'key_collision' | 'invalid_regex'
+  details: str              エラーの詳細説明
+
+PatternDef                  （patterns.py）
+  id: str                   パターンID（ユーザー定義）
+  name: str                 パターン名（表示用）
+  key_regex: str            キャプチャグループ1をキーとする正規表現
+  description: str          説明（省略可）
+  example_old_dir: str      生成時に使用した旧フォルダパス（省略可）
+  example_new_dir: str      生成時に使用した新フォルダパス（省略可）
+  created_at: str           作成日（ISO 8601）
+
+PatternStore                （patterns.py）
+  path: str                 patterns.jsonのパス
+  get(id) → Optional[PatternDef]
+  add_or_update(pattern)
+  list_all() → list[PatternDef]
+  save()
 ```
 
 ---
 
-## 10. 制約・スコープ外
+## 10. ファイルペアリングパターン管理
+
+### 10-1. 概要
+
+月次レポートなど、定期的にファイル名の一部（日付・バージョン番号）が変わるフォルダ比較に対応する。
+「正規表現のキャプチャグループ1をキーとして旧ファイルと新ファイルをペアリングする」というルールをパターンとして保存・再利用できる。
+
+### 10-2. ワークフロー
+
+```
+① discover  → ② 手動確認・編集 → ③ gen-pattern → ④ --pattern で繰り返し使用
+```
+
+1. `--discover` で類似度ベースのペア候補を探索し `pairs.json` に出力
+2. `pairs.json` を確認・修正してペアを確定させる
+3. `--gen-pattern` で `key_regex` を自動生成（または手動指定）し `patterns.json` に保存
+4. 以降は `--dir ... --pattern <ID>` で同じルールを適用
+
+### 10-3. key_regex の仕様
+
+- 正規表現のキャプチャグループ1（`(...)` 部分）がペアリングキーになる
+- 旧ファイル名と新ファイル名で group(1) が一致したもの同士をペアとする
+- パターンにマッチしないファイルは「比較対象外（パターン未マッチ）」として扱う
+
+**自動生成ロジック**
+
+`_split_stem()` でファイルステムを `(prefix, sep, variable)` に分割し、可変部分を正規表現に変換する。
+
+| 可変部分の例 | 変換後 |
+|---|---|
+| `20240101` / `20240201` | `\d{8}` |
+| `202401` / `202402` | `\d{6}` |
+| `v1` / `v2` | `v\d+` |
+| `001` / `002` | `\d+` |
+
+生成例: `^(.+?)_(?:\d{8}|v\d+)\.xlsx$`
+
+### 10-4. 検証ルール
+
+`--gen-pattern` 実行時、保存前に以下を検証する（1件でもエラーがあれば保存しない）。
+
+| エラー種別 | 内容 |
+|---|---|
+| `invalid_regex` | 正規表現の文法エラー |
+| `no_match` | 確認済みペアのいずれかのファイル名が正規表現にマッチしない |
+| `key_mismatch` | 旧ファイルのキー ≠ 新ファイルのキー |
+| `key_collision` | 同一キーに複数ファイルがマッチ |
+
+### 10-5. patterns.json フォーマット
+
+```json
+{
+  "patterns": [
+    {
+      "id": "monthly",
+      "name": "月次レポート",
+      "key_regex": "^(.+?)_(?:\\d{8}|v\\d+)\\.xlsx$",
+      "description": "",
+      "example_old_dir": "old_202401",
+      "example_new_dir": "new_202402",
+      "created_at": "2024-02-01"
+    }
+  ]
+}
+```
+
+---
+
+## 11. 制約・スコープ外
 
 | 項目 | 扱い |
 |---|---|
@@ -399,7 +588,7 @@ FileDiff
 
 ---
 
-## 11. テスト方針
+## 12. テスト方針
 
 - `tests/make_fixtures.py` でテスト用Excelファイルを自動生成（外部ファイル依存なし）
 - `tests/test_diff.py` でdiffエンジンのユニットテスト（openpyxlを使わずデータモデル直接）
@@ -460,7 +649,7 @@ FileDiff
 
 ---
 
-## 12. ビルド手順
+## 13. ビルド手順
 
 ```bat
 :: 初回セットアップ
@@ -481,7 +670,7 @@ pyinstaller --onefile --name excel-diff --clean excel_diff/__main__.py
 
 ---
 
-## 13. 将来の拡張候補（スコープ外）
+## 14. 将来の拡張候補（スコープ外）
 
 - 列レベルのLCS diff（列挿入・削除への対応）
 - GUIモード（tkinterでファイル選択ダイアログ）
