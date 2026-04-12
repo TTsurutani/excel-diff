@@ -159,17 +159,29 @@ body {
   background: #fff;
 }
 
-/* ─── 左右分割パネル ─── */
+/* ─── 左右分割パネル（flexboxで確実に幅を制約） ─── */
 .sheet-panels {
-  display: grid;
-  grid-template-columns: 50% 50%;
-  grid-template-rows: max-content 1fr;
+  display: flex;
+  flex-direction: row;
   min-height: 300px;
   max-height: calc(100vh - 80px);
+  overflow: hidden;
 }
+
+/* タイトル＋パネルを縦に並べるラッパー */
+.panel-wrapper {
+  flex: 1 1 0;        /* 均等幅・縮小可・基点0 */
+  min-width: 0;       /* コンテンツ幅に引っ張られないよう制約 */
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #d0d7de;
+  overflow: hidden;   /* ラッパー自体はクリップ、スクロールは.panelが担う */
+}
+.panel-wrapper:last-child { border-right: none; }
 
 /* ファイルパスタイトル行 */
 .file-title {
+  flex-shrink: 0;
   font-weight: bold;
   color: #fff;
   background: linear-gradient(mediumblue, darkblue);
@@ -178,22 +190,16 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border-right: 1px solid #003;
 }
-.file-title:last-of-type { border-right: none; }
 
 /* スクロール可能なパネル本体 */
 .panel {
-  overflow: auto;
-  min-width: 0;     /* CSS Grid アイテムのデフォルト min-width:auto を上書き。
-                       これがないとアイテムがコンテンツ幅まで拡張し
-                       水平オーバーフローが発生せずスクロールバーが出ない */
+  flex: 1;
   min-height: 0;
-  border-right: 1px solid #d0d7de;
+  overflow: auto;     /* 水平・垂直ともスクロール */
 }
-.panel:last-child { border-right: none; }
 
-/* ─── カスタムスクロールバー（水平バーを太くして操作しやすく） ─── */
+/* ─── カスタムスクロールバー ─── */
 .panel::-webkit-scrollbar         { width: 10px; height: 12px; }
 .panel::-webkit-scrollbar-track   { background: #ebebeb; }
 .panel::-webkit-scrollbar-thumb   { background: #b0b0b0; border-radius: 6px; }
@@ -268,14 +274,16 @@ body {
 
 /* ─── 上下レイアウト ─── */
 .sheet-panels.layout-vertical {
-  grid-template-columns: 100%;
-  grid-template-rows: max-content 1fr max-content 1fr;
+  flex-direction: column;
   max-height: none;
 }
-.sheet-panels.layout-vertical .panel {
-  max-height: 45vh;
+.sheet-panels.layout-vertical .panel-wrapper {
   border-right: none;
   border-bottom: 1px solid #d0d7de;
+}
+.sheet-panels.layout-vertical .panel-wrapper:last-child { border-bottom: none; }
+.sheet-panels.layout-vertical .panel {
+  max-height: 40vh;
 }
 
 /* ─── 文字レベル diff ─── */
@@ -308,13 +316,17 @@ body {
 # ---------------------------------------------------------------------------
 
 _JS = """
-// ── スクロール同期（垂直は常時、水平はトグル） ──────────────────────────
+// ── スクロール同期（垂直・水平ともトグル、デフォルト同期ON） ────────────
 var _hSyncEnabled = true;
+var _vSyncEnabled = true;
 
 function toggleHSync() {
   _hSyncEnabled = !_hSyncEnabled;
-  var btn = document.getElementById('btnHSync');
-  btn.classList.toggle('btn-on', _hSyncEnabled);
+  document.getElementById('btnHSync').classList.toggle('btn-on', _hSyncEnabled);
+}
+function toggleVSync() {
+  _vSyncEnabled = !_vSyncEnabled;
+  document.getElementById('btnVSync').classList.toggle('btn-on', _vSyncEnabled);
 }
 
 document.querySelectorAll('.panel-pair').forEach(function(pair) {
@@ -324,14 +336,14 @@ document.querySelectorAll('.panel-pair').forEach(function(pair) {
   var syncing = false;
   left.addEventListener('scroll', function() {
     if (syncing) return; syncing = true;
-    right.scrollTop = left.scrollTop;                          // 垂直は常時同期
-    if (_hSyncEnabled) right.scrollLeft = left.scrollLeft;    // 水平はトグル制御
+    if (_vSyncEnabled) right.scrollTop  = left.scrollTop;
+    if (_hSyncEnabled) right.scrollLeft = left.scrollLeft;
     syncing = false;
   });
   right.addEventListener('scroll', function() {
     if (syncing) return; syncing = true;
-    left.scrollTop = right.scrollTop;                         // 垂直は常時同期
-    if (_hSyncEnabled) left.scrollLeft = right.scrollLeft;   // 水平はトグル制御
+    if (_vSyncEnabled) left.scrollTop  = right.scrollTop;
+    if (_hSyncEnabled) left.scrollLeft = right.scrollLeft;
     syncing = false;
   });
 });
@@ -636,10 +648,14 @@ def _render_sheet(sheet_diff: SheetDiff, old_path: str, new_path: str) -> str:
 
     panels_html = (
         f'<div class="sheet-panels panel-pair">'
+        f'<div class="panel-wrapper">'
         f'<div class="file-title">{old_label}</div>'
-        f'<div class="file-title">{new_label}</div>'
         f'<div class="panel">{make_table(left_rows)}</div>'
+        f'</div>'
+        f'<div class="panel-wrapper">'
+        f'<div class="file-title">{new_label}</div>'
         f'<div class="panel">{make_table(right_rows)}</div>'
+        f'</div>'
         f'</div>'
     )
 
@@ -734,6 +750,8 @@ def render(file_diff: FileDiff) -> str:
       <span class="toolbar-group-label">スクロール</span>
       <button class="btn" id="btnFreezeCol"
               onclick="toggleFreezeColumns()" title="先頭3列(A/B/C)を横スクロール固定">3列固定</button>
+      <button class="btn btn-on" id="btnVSync"
+              onclick="toggleVSync()" title="左右パネルの垂直スクロールを同期">垂直同期</button>
       <button class="btn btn-on" id="btnHSync"
               onclick="toggleHSync()" title="左右パネルの水平スクロールを同期">水平同期</button>
     </div>
