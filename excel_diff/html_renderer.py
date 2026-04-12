@@ -132,7 +132,7 @@ body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: visible; /* hidden にすると内側パネルの横スクロールバーが消えるため visible に */
 }
 
 /* ─── シートセクション ─── */
