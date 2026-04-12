@@ -195,6 +195,11 @@ body {
 .strike { text-decoration: line-through; }
 /* 除外列（比較対象外） */
 .cell-excluded { color: #bbb !important; background: #f8f8f8 !important; }
+/* 上下表示: MODIFY行の旧側・新側 */
+.row-modified-old td     { background: #ffeef0; }
+.row-modified-old .line-num { background: #ffd7dc !important; }
+.row-modified-new td     { background: #e6ffed; }
+.row-modified-new .line-num { background: #ccffd8 !important; }
 """
 
 # ---------------------------------------------------------------------------
@@ -209,6 +214,20 @@ function toggleEqual() {
   rows.forEach(function(r) { r.style.display = showing ? 'none' : ''; });
   btn.setAttribute('data-showing', showing ? 'false' : 'true');
   btn.textContent = showing ? '全行を表示' : '変更行のみ表示';
+}
+
+var _layout = 'sbs';
+function toggleLayout() {
+  var isSbs = _layout === 'sbs';
+  document.querySelectorAll('.view-sbs').forEach(function(el) {
+    el.style.display = isSbs ? 'none' : '';
+  });
+  document.querySelectorAll('.view-stacked').forEach(function(el) {
+    el.style.display = isSbs ? '' : 'none';
+  });
+  _layout = isSbs ? 'stacked' : 'sbs';
+  document.getElementById('btnToggleLayout').textContent =
+    isSbs ? 'サイドバイサイドに切り替え' : '上下表示に切り替え';
 }
 """
 
@@ -338,6 +357,66 @@ def _render_row(
     )
 
 
+def _render_stacked_rows(
+    row_diff: RowDiff,
+    max_cols: int,
+    col_filter: Optional[set[int]] = None,
+) -> str:
+    """
+    上下表示用: 1つの RowDiff を 1〜2 行の <tr> として返す。
+    MODIFY は 旧行(赤系)→新行(緑系) の2行。それ以外は1行。
+    """
+    tag = row_diff.tag
+
+    def _is_excluded(i: int) -> bool:
+        return col_filter is not None and i not in col_filter
+
+    def _build_tds(row_data, changed_html: dict[int, str]) -> str:
+        cells = row_data.cells if row_data else []
+        tds = ""
+        for i in range(max_cols):
+            cell = cells[i] if i < len(cells) else None
+            if _is_excluded(i):
+                tds += f'<td class="cell-excluded">{_render_cell_value(cell)}</td>'
+            elif i in changed_html:
+                tds += f"<td>{changed_html[i]}</td>"
+            else:
+                tds += f"<td>{_render_cell_value(cell)}</td>"
+        return tds
+
+    if tag == RowTag.MODIFY:
+        changed = {cd.col_idx: cd for cd in row_diff.cell_diffs}
+        char_diffs = {
+            col_idx: _render_cell_pair_diff(cd.old_cell, cd.new_cell)
+            for col_idx, cd in changed.items()
+        }
+        old_ln = str(row_diff.old_row.row_idx) if row_diff.old_row else ""
+        new_ln = str(row_diff.new_row.row_idx) if row_diff.new_row else ""
+        old_tds = _build_tds(row_diff.old_row, {i: v[0] for i, v in char_diffs.items()})
+        new_tds = _build_tds(row_diff.new_row, {i: v[1] for i, v in char_diffs.items()})
+        return (
+            f'<tr class="row-modified-old">'
+            f'<td class="line-num">{old_ln}</td>{old_tds}</tr>'
+            f'<tr class="row-modified-new">'
+            f'<td class="line-num">{new_ln}</td>{new_tds}</tr>'
+        )
+
+    elif tag == RowTag.DELETE:
+        ln = str(row_diff.old_row.row_idx) if row_diff.old_row else ""
+        tds = _build_tds(row_diff.old_row, {})
+        return f'<tr class="row-deleted"><td class="line-num">{ln}</td>{tds}</tr>'
+
+    elif tag == RowTag.INSERT:
+        ln = str(row_diff.new_row.row_idx) if row_diff.new_row else ""
+        tds = _build_tds(row_diff.new_row, {})
+        return f'<tr class="row-inserted"><td class="line-num">{ln}</td>{tds}</tr>'
+
+    else:  # EQUAL
+        ln = str(row_diff.old_row.row_idx) if row_diff.old_row else ""
+        tds = _build_tds(row_diff.old_row, {})
+        return f'<tr class="row-equal"><td class="line-num">{ln}</td>{tds}</tr>'
+
+
 def _render_sheet(sheet_diff: SheetDiff) -> str:
     status_text = {
         "modified": "変更あり",
@@ -357,28 +436,39 @@ def _render_sheet(sheet_diff: SheetDiff) -> str:
     if sheet_diff.status == "equal":
         return header + '<div class="no-diff-msg">変更なし</div>'
 
-    # 列ヘッダ行
-    col_ths_old = "".join(f'<th>{_e(c)}</th>' for c in sheet_diff.col_letters[:sheet_diff.max_cols])
-    col_ths_new = col_ths_old
-    header_row = (
+    col_ths = "".join(f'<th>{_e(c)}</th>' for c in sheet_diff.col_letters[:sheet_diff.max_cols])
+
+    # --- サイドバイサイドビュー ---
+    header_row_sbs = (
         f'<tr>'
-        f'<th class="line-num">#</th>{col_ths_old}'
+        f'<th class="line-num">#</th>{col_ths}'
         f'<th class="sep-col"></th>'
-        f'<th class="line-num">#</th>{col_ths_new}'
+        f'<th class="line-num">#</th>{col_ths}'
         f'</tr>'
     )
-
-    rows_html = "\n".join(
+    rows_sbs = "\n".join(
         _render_row(rd, sheet_diff.max_cols, sheet_diff.col_filter)
         for rd in sheet_diff.row_diffs
     )
-
-    table = (
-        f'<div class="diff-wrap">'
-        f'<table class="diff-table">{header_row}\n{rows_html}</table>'
+    table_sbs = (
+        f'<div class="diff-wrap view-sbs">'
+        f'<table class="diff-table">{header_row_sbs}\n{rows_sbs}</table>'
         f'</div>'
     )
-    return header + table
+
+    # --- 上下表示ビュー ---
+    header_row_stacked = f'<tr><th class="line-num">#</th>{col_ths}</tr>'
+    rows_stacked = "\n".join(
+        _render_stacked_rows(rd, sheet_diff.max_cols, sheet_diff.col_filter)
+        for rd in sheet_diff.row_diffs
+    )
+    table_stacked = (
+        f'<div class="diff-wrap view-stacked" style="display:none">'
+        f'<table class="diff-table">{header_row_stacked}\n{rows_stacked}</table>'
+        f'</div>'
+    )
+
+    return header + table_sbs + table_stacked
 
 
 # ---------------------------------------------------------------------------
@@ -465,6 +555,7 @@ def render(file_diff: FileDiff) -> str:
 </div>
 <div class="toolbar">
   <button class="btn" id="btnToggleEqual" data-showing="true" onclick="toggleEqual()">変更行のみ表示</button>
+  <button class="btn" id="btnToggleLayout" onclick="toggleLayout()">上下表示に切り替え</button>
 </div>
 {sheets_html}
 <script>{_JS}</script>
