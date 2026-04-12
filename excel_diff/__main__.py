@@ -6,12 +6,20 @@ excel-diff CLI エントリポイント。
   python -m excel_diff old.xlsx new.xlsx
   python -m excel_diff old.xlsx new.xlsx -o diff.html --open
 
-  # フォルダ一括比較
+  # フォルダ一括比較（完全一致）
   python -m excel_diff --dir old_dir/ new_dir/
-  python -m excel_diff --dir old_dir/ new_dir/ --output-dir diffs/
 
-  # カスタムマッチャー適用
-  python -m excel_diff old.xlsx new.xlsx --matchers matchers.json
+  # フォルダ一括比較（パターン使用）
+  python -m excel_diff --dir old_dir/ new_dir/ --pattern monthly
+
+  # ペア候補探索
+  python -m excel_diff --discover old_dir/ new_dir/ -o pairs.json
+
+  # ペアからパターン生成
+  python -m excel_diff --gen-pattern pairs.json --id monthly --name "月次レポート"
+
+  # パターン一覧
+  python -m excel_diff --list-patterns
 """
 from __future__ import annotations
 
@@ -22,6 +30,10 @@ import webbrowser
 from pathlib import Path
 
 
+# ---------------------------------------------------------------------------
+# 引数パーサ
+# ---------------------------------------------------------------------------
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="excel-diff",
@@ -31,18 +43,59 @@ def _build_parser() -> argparse.ArgumentParser:
 例:
   excel-diff old.xlsx new.xlsx
   excel-diff old.xlsx new.xlsx -o diff.html --open
-  excel-diff --dir old_dir new_dir --output-dir diffs/
-  excel-diff old.xlsx new.xlsx --matchers matchers.json
+  excel-diff --dir old_dir new_dir
+  excel-diff --dir old_dir new_dir --pattern monthly
+  excel-diff --discover old_dir new_dir -o pairs.json
+  excel-diff --gen-pattern pairs.json --id monthly --name "月次レポート"
+  excel-diff --list-patterns
 """,
     )
+
+    # --- ファイル比較 ---
     p.add_argument("old_file", nargs="?", help="比較元ファイル (.xlsx)")
     p.add_argument("new_file", nargs="?", help="比較先ファイル (.xlsx)")
     p.add_argument("-o", "--output", metavar="PATH",
                    help="出力HTMLパス（省略時: <新ファイル名>_diff.html）")
+
+    # --- フォルダ比較 ---
     p.add_argument("--dir", nargs=2, metavar=("OLD_DIR", "NEW_DIR"),
                    help="フォルダ一括比較")
     p.add_argument("--output-dir", metavar="DIR",
                    help="フォルダ比較時の出力先ディレクトリ")
+
+    # --- ペア探索 ---
+    p.add_argument("--discover", nargs=2, metavar=("OLD_DIR", "NEW_DIR"),
+                   help="ファイルペア候補を探索してJSONに保存")
+    p.add_argument("--threshold", type=float, default=0.6, metavar="SCORE",
+                   help="--discover の類似度しきい値 (0.0〜1.0, デフォルト: 0.6)")
+
+    # --- パターン生成 ---
+    p.add_argument("--gen-pattern", metavar="PAIRS_JSON",
+                   help="確認済みペアJSONからパターン（正規表現）を生成・保存")
+    p.add_argument("--id", metavar="ID",
+                   help="--gen-pattern: パターンID")
+    p.add_argument("--name", metavar="NAME",
+                   help="--gen-pattern: パターン名")
+    p.add_argument("--regex", metavar="REGEX",
+                   help="--gen-pattern: 正規表現を手動指定（自動生成をスキップ）")
+    p.add_argument("--desc", metavar="TEXT",
+                   help="--gen-pattern: パターンの説明")
+    p.add_argument("--example-old", metavar="DIR",
+                   help="--gen-pattern: 旧フォルダの例")
+    p.add_argument("--example-new", metavar="DIR",
+                   help="--gen-pattern: 新フォルダの例")
+
+    # --- パターン一覧 ---
+    p.add_argument("--list-patterns", action="store_true",
+                   help="保存済みパターンを一覧表示")
+
+    # --- パターン指定（フォルダ比較時） ---
+    p.add_argument("--pattern", metavar="ID",
+                   help="フォルダ比較時に使用するパターンID")
+    p.add_argument("--patterns-file", metavar="FILE", default="patterns.json",
+                   help="パターン定義ファイルのパス (デフォルト: patterns.json)")
+
+    # --- 共通オプション ---
     p.add_argument("--sheet", metavar="NAME",
                    help="指定シートのみ比較（省略時: 全シート）")
     p.add_argument("--strikethrough", action="store_true",
@@ -54,6 +107,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--open", action="store_true",
                    help="生成後にブラウザで自動オープン")
     return p
+
+
+# ---------------------------------------------------------------------------
+# ヘルパー
+# ---------------------------------------------------------------------------
+
+def _default_output_path(new_file: str) -> str:
+    stem = Path(new_file).stem
+    parent = Path(new_file).parent
+    return str(parent / f"{stem}_diff.html")
 
 
 def _diff_stats(file_diff) -> tuple[int, int, int]:
@@ -73,12 +136,6 @@ def _stats_line(delete: int, insert: int, modify: int) -> str:
     return "、".join(parts) if parts else "行変更なし"
 
 
-def _default_output_path(new_file: str) -> str:
-    stem = Path(new_file).stem
-    parent = Path(new_file).parent
-    return str(parent / f"{stem}_diff.html")
-
-
 def _build_config(args: argparse.Namespace):
     """引数から DiffConfig を組み立てて返す。"""
     from .matcher import load_config, DiffConfig, parse_col_spec
@@ -92,12 +149,188 @@ def _build_config(args: argparse.Namespace):
     else:
         config = DiffConfig()
 
-    # --include-cols はコマンドライン側でグローバルフィルタを上書き
     if args.include_cols:
         config.global_col_filter = parse_col_spec(args.include_cols)
 
     return config
 
+
+def _collect_pairs_exact(old_dir: str, new_dir: str):
+    """完全一致ベースのペアリング（--pattern 未指定時）。"""
+    from .file_pairing import FilePair
+    old_files = {
+        f for f in os.listdir(old_dir)
+        if f.lower().endswith(".xlsx") and not f.startswith("~$")
+    }
+    new_files = {
+        f for f in os.listdir(new_dir)
+        if f.lower().endswith(".xlsx") and not f.startswith("~$")
+    }
+    all_names = sorted(old_files | new_files)
+    return [
+        FilePair(
+            old_name=name if name in old_files else None,
+            new_name=name if name in new_files else None,
+            score=1.0,
+            matched_by="exact",
+        )
+        for name in all_names
+    ]
+
+
+# ---------------------------------------------------------------------------
+# --discover
+# ---------------------------------------------------------------------------
+
+def _run_discover(args: argparse.Namespace) -> None:
+    from .file_pairing import discover_pairs, save_pairs
+
+    old_dir, new_dir = args.discover
+
+    for d in (old_dir, new_dir):
+        if not os.path.isdir(d):
+            print(f"エラー: ディレクトリが見つかりません: {d}", file=sys.stderr)
+            sys.exit(1)
+
+    pairs = discover_pairs(old_dir, new_dir, threshold=args.threshold)
+
+    print("ペア候補:")
+    for p in pairs:
+        if p.matched_by == "exact":
+            print(f"  [完全一致] {p.old_name}")
+        elif p.matched_by == "auto":
+            print(f"  [自動 {p.score:.0%}] {p.old_name}  →  {p.new_name}")
+        elif p.matched_by == "unmatched_old":
+            print(f"  [未対応-旧] {p.old_name}")
+        elif p.matched_by == "unmatched_new":
+            print(f"  [未対応-新] {p.new_name}")
+
+    output = args.output or "pairs.json"
+    save_pairs(pairs, output)
+    print(f"\n→ {output} に保存しました")
+    print("内容を確認・編集後、--gen-pattern で正規表現を生成してください。")
+
+
+# ---------------------------------------------------------------------------
+# --gen-pattern
+# ---------------------------------------------------------------------------
+
+def _run_gen_pattern(args: argparse.Namespace) -> None:
+    from datetime import date
+    from .file_pairing import load_pairs, generate_regex, validate_regex
+    from .patterns import PatternStore, PatternDef
+
+    if not args.id or not args.name:
+        print("エラー: --id と --name は必須です", file=sys.stderr)
+        sys.exit(1)
+
+    pairs_path = args.gen_pattern
+    if not os.path.isfile(pairs_path):
+        print(f"エラー: ペアファイルが見つかりません: {pairs_path}", file=sys.stderr)
+        sys.exit(1)
+
+    pairs = load_pairs(pairs_path)
+    matched = [p for p in pairs if p.old_name and p.new_name]
+
+    if not matched:
+        print("エラー: 比較可能なペアがありません", file=sys.stderr)
+        sys.exit(1)
+
+    # 正規表現の決定
+    if args.regex:
+        key_regex = args.regex
+        print(f"指定正規表現: {key_regex}")
+    else:
+        key_regex = generate_regex(pairs)
+        if key_regex:
+            print(f"提案パターン: {key_regex}")
+            print()
+            print("キー抽出例:")
+            import re
+            pat = re.compile(key_regex)
+            for p in matched[:5]:  # 最大5件表示
+                m_old = pat.fullmatch(p.old_name)
+                m_new = pat.fullmatch(p.new_name)
+                key = m_old.group(1) if m_old else "?"
+                print(f"  {p.old_name}  →  キー: \"{key}\"")
+                print(f"  {p.new_name}  →  キー: \"{m_new.group(1) if m_new else '?'}\"")
+                print()
+        else:
+            print("正規表現の自動生成に失敗しました。")
+            print("--regex オプションで正規表現を手動指定してください。")
+            print(r'例: --regex "^(.+?)_\d{8}\.xlsx$"')
+            sys.exit(1)
+
+    # 検証
+    print("検証中...")
+    errors = validate_regex(matched, key_regex)
+
+    if errors:
+        print("[NG] 検証失敗:")
+        for e in errors:
+            print(f"  [{e.kind}] {e.details}")
+        print()
+        print("正規表現を修正して --regex オプションで再指定してください。")
+        sys.exit(1)
+
+    print(f"[OK] 検証OK: {len(matched)} ペアすべてが正しく再現されます")
+
+    # パターン保存
+    store = PatternStore(args.patterns_file)
+    pattern = PatternDef(
+        id=args.id,
+        name=args.name,
+        key_regex=key_regex,
+        description=args.desc or "",
+        example_old_dir=args.example_old or "",
+        example_new_dir=args.example_new or "",
+        created_at=str(date.today()),
+    )
+    store.add_or_update(pattern)
+    store.save()
+
+    print()
+    print(f"パターンを保存しました: {args.patterns_file}")
+    print(f"  ID      : {pattern.id}")
+    print(f"  名前    : {pattern.name}")
+    print(f"  正規表現: {pattern.key_regex}")
+    print()
+    print(f"使用方法: excel-diff --dir old/ new/ --pattern {pattern.id}")
+
+
+# ---------------------------------------------------------------------------
+# --list-patterns
+# ---------------------------------------------------------------------------
+
+def _run_list_patterns(args: argparse.Namespace) -> None:
+    from .patterns import PatternStore
+
+    store = PatternStore(args.patterns_file)
+    patterns = store.list_all()
+
+    if not patterns:
+        print(f"保存済みパターンはありません。({args.patterns_file})")
+        return
+
+    print(f"保存済みパターン一覧: {args.patterns_file}")
+    for p in patterns:
+        print()
+        print(f"  ID      : {p.id}")
+        print(f"  名前    : {p.name}")
+        print(f"  正規表現: {p.key_regex}")
+        if p.description:
+            print(f"  説明    : {p.description}")
+        if p.example_old_dir:
+            print(f"  例 (旧) : {p.example_old_dir}")
+        if p.example_new_dir:
+            print(f"  例 (新) : {p.example_new_dir}")
+        if p.created_at:
+            print(f"  作成日  : {p.created_at}")
+
+
+# ---------------------------------------------------------------------------
+# ファイル比較
+# ---------------------------------------------------------------------------
 
 def _run_file_diff(args: argparse.Namespace) -> None:
     from .reader import read_workbook
@@ -130,10 +363,8 @@ def _run_file_diff(args: argparse.Namespace) -> None:
     )
 
     output_path = args.output or _default_output_path(new_path)
-    html_content = render(file_diff)
-
     with open(output_path, "w", encoding="utf-8") as f:
-        f.write(html_content)
+        f.write(render(file_diff))
 
     print()
     if file_diff.has_differences:
@@ -149,34 +380,50 @@ def _run_file_diff(args: argparse.Namespace) -> None:
         webbrowser.open(Path(output_path).resolve().as_uri())
 
 
+# ---------------------------------------------------------------------------
+# フォルダ比較
+# ---------------------------------------------------------------------------
+
 def _run_dir_diff(args: argparse.Namespace) -> None:
     from .reader import read_workbook
     from .diff_engine import diff_files
     from .html_renderer import render
+    from .file_pairing import apply_pattern
 
     old_dir, new_dir = args.dir
 
-    if not os.path.isdir(old_dir):
-        print(f"エラー: ディレクトリが見つかりません: {old_dir}", file=sys.stderr)
-        sys.exit(1)
-    if not os.path.isdir(new_dir):
-        print(f"エラー: ディレクトリが見つかりません: {new_dir}", file=sys.stderr)
-        sys.exit(1)
+    for d in (old_dir, new_dir):
+        if not os.path.isdir(d):
+            print(f"エラー: ディレクトリが見つかりません: {d}", file=sys.stderr)
+            sys.exit(1)
 
     config = _build_config(args)
 
-    # 両ディレクトリの .xlsx ファイル名を収集
-    old_files = {
-        f for f in os.listdir(old_dir)
-        if f.lower().endswith(".xlsx") and not f.startswith("~$")
-    }
-    new_files = {
-        f for f in os.listdir(new_dir)
-        if f.lower().endswith(".xlsx") and not f.startswith("~$")
-    }
-    all_files = sorted(old_files | new_files)
+    # ペアリング
+    if args.pattern:
+        from .patterns import PatternStore
+        store = PatternStore(args.patterns_file)
+        pat = store.get(args.pattern)
+        if pat is None:
+            print(f"エラー: パターン '{args.pattern}' が見つかりません ({args.patterns_file})", file=sys.stderr)
+            sys.exit(1)
+        print(f"パターン「{pat.name}」を使用")
+        print(f"  正規表現: {pat.key_regex}")
+        pairs = apply_pattern(old_dir, new_dir, pat.key_regex)
 
-    if not all_files:
+        # パターンペアリング結果を表示
+        named_pairs = [p for p in pairs if p.old_name and p.new_name and p.old_name != p.new_name]
+        if named_pairs:
+            print("ペアリング:")
+            for p in named_pairs:
+                print(f"  {p.old_name}  →  {p.new_name}")
+    else:
+        pairs = _collect_pairs_exact(old_dir, new_dir)
+
+    compare_pairs = [p for p in pairs if p.old_name and p.new_name]
+    unmatched = [p for p in pairs if not p.old_name or not p.new_name]
+
+    if not compare_pairs:
         print("比較対象の .xlsx ファイルが見つかりませんでした。")
         return
 
@@ -191,56 +438,72 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
     os.makedirs(out_dir, exist_ok=True)
     print(f"出力先: {out_dir}/")
 
+    # 比較処理
     results = []
-    for fname in all_files:
-        old_path = os.path.join(old_dir, fname)
-        new_path = os.path.join(new_dir, fname)
+    for pair in compare_pairs:
+        old_path = os.path.join(old_dir, pair.old_name)
+        new_path = os.path.join(new_dir, pair.new_name)
 
-        if not os.path.isfile(old_path):
-            old_sheets = {}
-        else:
-            old_sheets = read_workbook(old_path, args.strikethrough, args.sheet)
-
-        if not os.path.isfile(new_path):
-            new_sheets = {}
-        else:
-            new_sheets = read_workbook(new_path, args.strikethrough, args.sheet)
+        old_sheets = read_workbook(old_path, args.strikethrough, args.sheet) if os.path.isfile(old_path) else {}
+        new_sheets = read_workbook(new_path, args.strikethrough, args.sheet) if os.path.isfile(new_path) else {}
 
         file_diff = diff_files(
             old_sheets, new_sheets,
-            old_path if os.path.isfile(old_path) else f"(なし)/{fname}",
-            new_path if os.path.isfile(new_path) else f"(なし)/{fname}",
+            old_path, new_path,
             include_strike=args.strikethrough,
             config=config,
         )
 
-        stem = Path(fname).stem
+        # 出力HTMLのファイル名は新ファイルのステムを使う
+        stem = Path(pair.new_name).stem
         out_path = os.path.join(out_dir, f"{stem}_diff.html")
-        html_content = render(file_diff)
         with open(out_path, "w", encoding="utf-8") as f:
-            f.write(html_content)
+            f.write(render(file_diff))
 
-        results.append((fname, file_diff, out_path))
+        results.append((pair, file_diff, out_path))
 
+    # サマリ出力
     no_diff = [r for r in results if not r[1].has_differences]
     has_diff = [r for r in results if r[1].has_differences]
 
     print()
     print(f"差分なし: {len(no_diff)} ファイル")
     print(f"差分あり: {len(has_diff)} ファイル")
-    for fname, file_diff, out_path in has_diff:
+    for pair, file_diff, out_path in has_diff:
         delete, insert, modify = _diff_stats(file_diff)
-        print(f"  {fname}  ({_stats_line(delete, insert, modify)})  → {out_path}")
+        label = pair.new_name
+        if pair.old_name != pair.new_name:
+            label = f"{pair.old_name} → {pair.new_name}"
+        print(f"  {label}  ({_stats_line(delete, insert, modify)})  → {out_path}")
+
+    if unmatched:
+        print()
+        print(f"比較対象外: {len(unmatched)} ファイル")
+        for p in unmatched:
+            if p.old_name and not p.new_name:
+                print(f"  [旧のみ] {p.old_name}")
+            elif p.new_name and not p.old_name:
+                print(f"  [新のみ] {p.new_name}")
 
     if args.open and has_diff:
         webbrowser.open(Path(has_diff[0][2]).resolve().as_uri())
 
 
+# ---------------------------------------------------------------------------
+# エントリポイント
+# ---------------------------------------------------------------------------
+
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
-    if args.dir:
+    if args.discover:
+        _run_discover(args)
+    elif args.gen_pattern:
+        _run_gen_pattern(args)
+    elif args.list_patterns:
+        _run_list_patterns(args)
+    elif args.dir:
         _run_dir_diff(args)
     elif args.old_file and args.new_file:
         _run_file_diff(args)
