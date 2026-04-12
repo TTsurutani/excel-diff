@@ -184,10 +184,12 @@ body {
 
 /* スクロール可能なパネル本体 */
 .panel {
-  overflow-x: auto;   /* 水平スクロールを明示（カスタムCSS定義時に auto だと消える場合がある） */
-  overflow-y: auto;
-  border-right: 1px solid #d0d7de;
+  overflow: auto;
+  min-width: 0;     /* CSS Grid アイテムのデフォルト min-width:auto を上書き。
+                       これがないとアイテムがコンテンツ幅まで拡張し
+                       水平オーバーフローが発生せずスクロールバーが出ない */
   min-height: 0;
+  border-right: 1px solid #d0d7de;
 }
 .panel:last-child { border-right: none; }
 
