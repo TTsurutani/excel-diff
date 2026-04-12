@@ -70,15 +70,62 @@ body {
 .badge-deleted  { background: #ffeef0; color: #cf222e; }
 .badge-equal    { background: #eee;    color: #666; }
 .btn {
-  padding: 3px 10px;
-  border-radius: 5px;
-  border: 1px solid #e1e4e8;
+  padding: 3px 9px;
+  border-radius: 4px;
+  border: 1px solid #d0d7de;
   background: #fff;
   color: #24292e;
   font-size: 11px;
   cursor: pointer;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+  white-space: nowrap;
 }
 .btn:hover { background: #f0f0f0; }
+
+/* ON状態のボタン（青背景＋太字） */
+.btn-on {
+  background: #ddf4ff !important;
+  border-color: #0969da !important;
+  color: #0550ae !important;
+  font-weight: bold;
+}
+.btn-on:hover { background: #c8e8ff !important; }
+
+/* ─── ツールバーグループ ─── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.toolbar-sep {
+  width: 1px;
+  height: 22px;
+  background: #d0d7de;
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+.toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px 2px 5px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #f6f8fa;
+}
+.toolbar-group-label {
+  font-size: 10px;
+  color: #8b949e;
+  font-weight: bold;
+  padding-right: 5px;
+  margin-right: 3px;
+  border-right: 1px solid #d0d7de;
+  line-height: 18px;
+  white-space: nowrap;
+  user-select: none;
+}
 
 /* ─── シートコンテナ（残り全高さ） ─── */
 .sheets-container {
@@ -142,6 +189,17 @@ body {
   min-height: 0;
 }
 .panel:last-child { border-right: none; }
+
+/* ─── カスタムスクロールバー（垂直と同幅に拡大） ─── */
+.panel::-webkit-scrollbar        { width: 12px; height: 12px; }
+.panel::-webkit-scrollbar-track  { background: #f1f1f1; }
+.panel::-webkit-scrollbar-thumb  {
+  background: #bbb;
+  border-radius: 6px;
+  border: 2px solid #f1f1f1;
+}
+.panel::-webkit-scrollbar-thumb:hover   { background: #888; }
+.panel::-webkit-scrollbar-corner        { background: #f1f1f1; }
 
 /* ─── diff テーブル ─── */
 .diff-table {
@@ -258,8 +316,7 @@ var _hSyncEnabled = true;
 function toggleHSync() {
   _hSyncEnabled = !_hSyncEnabled;
   var btn = document.getElementById('btnHSync');
-  btn.textContent = _hSyncEnabled ? '水平同期 ON' : '水平同期 OFF';
-  btn.style.background = _hSyncEnabled ? '#ddf4ff' : '';
+  btn.classList.toggle('btn-on', _hSyncEnabled);
 }
 
 document.querySelectorAll('.panel-pair').forEach(function(pair) {
@@ -318,7 +375,7 @@ function toggleEqual() {
   var showing = btn.getAttribute('data-showing') !== 'false';
   rows.forEach(function(r) { r.style.display = showing ? 'none' : ''; });
   btn.setAttribute('data-showing', showing ? 'false' : 'true');
-  btn.textContent = showing ? '全行を表示' : '変更行のみ表示';
+  btn.classList.toggle('btn-on', showing);   // フィルタ中 = ON
   equalizeRowHeights();
 }
 
@@ -327,15 +384,9 @@ function toggleLayout() {
   var panels = document.querySelectorAll('.sheet-panels');
   var btn = document.getElementById('btnToggleLayout');
   var isVertical = btn.getAttribute('data-layout') === 'vertical';
-  panels.forEach(function(p) {
-    if (isVertical) {
-      p.classList.remove('layout-vertical');
-    } else {
-      p.classList.add('layout-vertical');
-    }
-  });
+  panels.forEach(function(p) { p.classList.toggle('layout-vertical', !isVertical); });
   btn.setAttribute('data-layout', isVertical ? 'horizontal' : 'vertical');
-  btn.textContent = isVertical ? '上下表示に切替' : '左右表示に切替';
+  btn.classList.toggle('btn-on', !isVertical);  // 上下表示中 = ON
   setTimeout(equalizeRowHeights, 50);
 }
 
@@ -348,13 +399,10 @@ function toggleFreezeColumns() {
   var btn = document.getElementById('btnFreezeCol');
   if (_colFreezeActive) {
     applyFreezeColumns(FREEZE_COLS);
-    btn.textContent = '列固定 解除';
-    btn.style.background = '#ddf4ff';
   } else {
     removeFreezeColumns();
-    btn.textContent = '先頭' + FREEZE_COLS + '列を固定';
-    btn.style.background = '';
   }
+  btn.classList.toggle('btn-on', _colFreezeActive);  // 固定中 = ON
 }
 
 function applyFreezeColumns(numCols) {
@@ -673,13 +721,24 @@ def render(file_diff: FileDiff) -> str:
 <div class="info-bar">
   {summary_html}
   {matcher_note}
-  <span style="margin-left:auto; display:flex; gap:6px;">
+  <div class="toolbar">
     {nav_items}
-    <button class="btn" id="btnToggleEqual" data-showing="true" onclick="toggleEqual()">変更行のみ表示</button>
-    <button class="btn" id="btnToggleLayout" data-layout="horizontal" onclick="toggleLayout()">上下表示に切替</button>
-    <button class="btn" id="btnFreezeCol" onclick="toggleFreezeColumns()">先頭3列を固定</button>
-    <button class="btn" id="btnHSync" style="background:#ddf4ff" onclick="toggleHSync()">水平同期 ON</button>
-  </span>
+    <div class="toolbar-sep"></div>
+    <div class="toolbar-group">
+      <span class="toolbar-group-label">表示</span>
+      <button class="btn" id="btnToggleEqual" data-showing="true"
+              onclick="toggleEqual()" title="変更のある行のみ表示 / 全行表示を切替">変更行のみ</button>
+      <button class="btn" id="btnToggleLayout" data-layout="horizontal"
+              onclick="toggleLayout()" title="左右 / 上下パネル配置を切替">上下表示</button>
+    </div>
+    <div class="toolbar-group">
+      <span class="toolbar-group-label">スクロール</span>
+      <button class="btn" id="btnFreezeCol"
+              onclick="toggleFreezeColumns()" title="先頭3列(A/B/C)を横スクロール固定">3列固定</button>
+      <button class="btn btn-on" id="btnHSync"
+              onclick="toggleHSync()" title="左右パネルの水平スクロールを同期">水平同期</button>
+    </div>
+  </div>
 </div>
 <div class="sheets-container">
 {sheets_html}
