@@ -132,7 +132,7 @@ body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  overflow-x: visible; /* hidden にすると内側パネルの横スクロールバーが消えるため visible に */
+  overflow-x: hidden;
 }
 
 /* ─── シートセクション ─── */
@@ -159,28 +159,17 @@ body {
   background: #fff;
 }
 
-/* ─── 左右分割パネル（flexboxで確実に幅を制約） ─── */
+/* ─── 左右分割パネル ─── */
 .sheet-panels {
-  display: flex;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: 50% 50%;
+  grid-template-rows: max-content 1fr;
   min-height: 300px;
-  max-height: calc(100vh - 80px);
-  overflow: hidden;  /* これがないと max-height を超えてパネルが伸び、スクロールバーが画面外に出る */
+  /* max-height は JS (resizePanels) で各 .panel に height を直接設定するため不要 */
 }
-
-/* タイトル＋パネルを縦に並べるラッパー */
-.panel-wrapper {
-  flex: 1 1 0;        /* 均等幅・縮小可・基点0 */
-  min-width: 0;       /* コンテンツ幅に引っ張られないよう制約 */
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid #d0d7de;
-}
-.panel-wrapper:last-child { border-right: none; }
 
 /* ファイルパスタイトル行 */
 .file-title {
-  flex-shrink: 0;
   font-weight: bold;
   color: #fff;
   background: linear-gradient(mediumblue, darkblue);
@@ -189,18 +178,21 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  border-right: 1px solid #003;
 }
+.file-title:last-of-type { border-right: none; }
 
 /* スクロール可能なパネル本体 */
+/* height は JS (resizePanels) で動的に設定。CSS フォールバックとして calc を置く */
 .panel {
-  flex: 1;
-  min-height: 0;
   overflow: auto;
-  /* webkit-scrollbarは祖先のoverflow:hiddenと干渉しスクロールバーが消えるため使わない */
-  /* 標準仕様のscrollbar-widthでスクロールバーサイズを確保（Chrome121+/Firefox/Edge対応） */
-  scrollbar-width: auto;
+  border-right: 1px solid #d0d7de;
+  height: calc(100vh - 120px);  /* JS が上書きするまでのフォールバック */
+  min-height: 150px;
+  scrollbar-width: auto;      /* スクロールバーを標準サイズで表示（webkit-scrollbarは使わない） */
   scrollbar-color: #b0b0b0 #ebebeb;
 }
+.panel:last-child { border-right: none; }
 
 /* ─── diff テーブル ─── */
 .diff-table {
@@ -271,17 +263,13 @@ body {
 
 /* ─── 上下レイアウト ─── */
 .sheet-panels.layout-vertical {
-  flex-direction: column;
-  max-height: none;
-  overflow: visible;
+  grid-template-columns: 100%;
+  grid-template-rows: max-content 1fr max-content 1fr;
 }
-.sheet-panels.layout-vertical .panel-wrapper {
+.sheet-panels.layout-vertical .panel {
+  /* height は JS (resizePanels) で設定 */
   border-right: none;
   border-bottom: 1px solid #d0d7de;
-}
-.sheet-panels.layout-vertical .panel-wrapper:last-child { border-bottom: none; }
-.sheet-panels.layout-vertical .panel {
-  max-height: 40vh;
 }
 
 /* ─── 文字レベル diff ─── */
@@ -395,7 +383,7 @@ function toggleLayout() {
   panels.forEach(function(p) { p.classList.toggle('layout-vertical', !isVertical); });
   btn.setAttribute('data-layout', isVertical ? 'horizontal' : 'vertical');
   btn.classList.toggle('btn-on', !isVertical);  // 上下表示中 = ON
-  setTimeout(equalizeRowHeights, 50);
+  setTimeout(function() { resizePanels(); equalizeRowHeights(); }, 50);
 }
 
 // ── 先頭N列を固定 ────────────────────────────────────────────────────────
@@ -442,8 +430,44 @@ function removeFreezeColumns() {
   });
 }
 
+// ── パネル高さを動的に計算してスクロールバーを確実に表示 ────────────────
+// sheets-container が overflow-y:auto でも、.panel に直接 height を設定する
+// ことで .panel 自身の overflow:auto が水平・垂直スクロールバーを表示できる
+function resizePanels() {
+  var topBar = document.querySelector('.top-bar');
+  var infoBar = document.querySelector('.info-bar');
+  if (!topBar || !infoBar) return;
+  var fixedH = topBar.offsetHeight + infoBar.offsetHeight;
+
+  document.querySelectorAll('.sheet-section').forEach(function(section) {
+    var header = section.querySelector('.sheet-header');
+    var headerH = header ? header.offsetHeight : 0;
+    var fileTitle = section.querySelector('.file-title');
+    var titleH = fileTitle ? fileTitle.offsetHeight : 0;
+    var isVertical = !!section.querySelector('.sheet-panels.layout-vertical');
+    var panels = section.querySelectorAll('.panel');
+    if (panels.length === 0) return;
+
+    var panelH;
+    if (isVertical) {
+      // 上下レイアウト: タイトル行が2つ分ある
+      var available = window.innerHeight - fixedH - headerH - titleH * 2 - 8;
+      panelH = Math.max(150, Math.floor(available / 2));
+    } else {
+      // 左右レイアウト
+      panelH = Math.max(150, window.innerHeight - fixedH - headerH - titleH - 4);
+    }
+    panels.forEach(function(panel) {
+      panel.style.height = panelH + 'px';
+    });
+  });
+}
+
+window.addEventListener('resize', resizePanels);
+
 // ── ページ読み込み後に行高さを均一化 ────────────────────────────────────
 window.addEventListener('load', function() {
+  resizePanels();
   equalizeRowHeights();
   toggleEqual();   // デフォルトで「変更行のみ表示」
 });
@@ -646,14 +670,10 @@ def _render_sheet(sheet_diff: SheetDiff, old_path: str, new_path: str) -> str:
 
     panels_html = (
         f'<div class="sheet-panels panel-pair">'
-        f'<div class="panel-wrapper">'
         f'<div class="file-title">{old_label}</div>'
-        f'<div class="panel">{make_table(left_rows)}</div>'
-        f'</div>'
-        f'<div class="panel-wrapper">'
         f'<div class="file-title">{new_label}</div>'
+        f'<div class="panel">{make_table(left_rows)}</div>'
         f'<div class="panel">{make_table(right_rows)}</div>'
-        f'</div>'
         f'</div>'
     )
 
