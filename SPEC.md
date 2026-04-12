@@ -22,8 +22,8 @@ excel_diff/
 ├── __init__.py
 ├── __main__.py          CLIエントリポイント
 ├── reader.py            Excelファイル読込
-├── matcher.py           カスタムマッチャー・列フィルタ定義
-├── diff_engine.py       差分アルゴリズム
+├── matcher.py           カスタムマッチャー・列フィルタ・DiffConfig定義
+├── diff_engine.py       差分アルゴリズム（LCS・キーJOIN両モード）
 ├── html_renderer.py     HTML出力
 ├── file_pairing.py      ファイルペアリング（discover / 正規表現生成・検証 / パターン適用）
 ├── patterns.py          パターン定義の永続化（PatternStore / patterns.json）
@@ -108,6 +108,8 @@ excel-diff.exe --split <ブック.xlsx> [--prefix TEXT] [--suffix TEXT] [--outpu
 | `--strikethrough` | 取り消し線の有無も差分として扱う | 無効（値のみ比較） |
 | `--matchers FILE` | カスタムマッチャー／列フィルタ設定JSONファイル | なし |
 | `--include-cols SPEC` | 比較対象列の指定（例: `B:U`） | 全列比較 |
+| `--key-cols SPEC` | キーJOIN差分モードのキー列（例: `C` / `B,C`）。指定するとキーモードが有効になる | なし |
+| `--diff-mode MODE` | 差分モード: `lcs` または `key` | `lcs` |
 | `--open` | 生成後にブラウザで自動オープン | 無効 |
 
 **ペアリングパターン管理**
@@ -142,9 +144,15 @@ excel-diff.exe --split <ブック.xlsx> [--prefix TEXT] [--suffix TEXT] [--outpu
     ↓
 [シートのマッチング]  ← 同名シートを対応付け
     ↓
-[行レベルLCS diff]    ← SequenceMatcherで行挿入・削除を追跡
-    ↓                    ※比較対象列のみハッシュに含める
-[replaceブロックの行ペアリング]  ← 類似度スコアで最適ペアを選択
+[行レベルdiff]  ← diff_mode により分岐
+    │
+    ├─ lcs モード: SequenceMatcherでLCS計算
+    │       ↓
+    │   [replaceブロックの行ペアリング]  ← 類似度スコアで最適ペアを選択
+    │
+    └─ key モード: key_cols でキーJOIN
+            ↓
+        [キー一致行の対応付け]  ← DELETE / INSERT / MODIFY を確定
     ↓
 [セルレベルdiff]      ← MODIFYの行のみ、比較対象列で比較
     ↓
@@ -177,7 +185,7 @@ excel-diff.exe --split <ブック.xlsx> [--prefix TEXT] [--suffix TEXT] [--outpu
 | `_x000D_` の除去 | Excel内部のCR表現 `_x000D_` をテキストから除去 |
 | 改行コードの統一 | `\r\n` / `\r` を `\n` に変換（ファイル間の改行コード差異を吸収） |
 
-### 5-5. 行レベルLCS diff
+### 5-5. LCSモード（`diff_mode="lcs"`）
 
 1. 各行を「行ハッシュ（tuple）」に変換（比較対象列のみ使用）
 2. `difflib.SequenceMatcher(autojunk=False)` でLCS計算
@@ -190,14 +198,42 @@ excel-diff.exe --split <ブック.xlsx> [--prefix TEXT] [--suffix TEXT] [--outpu
 | `insert` | INSERT（新ファイルの行が追加） |
 | `replace` | replaceブロック内で類似度ペアリング → MODIFY or DELETE/INSERT |
 
-### 5-6. replaceブロックのペアリング
+**replaceブロックのペアリング**
 
 `replace` ブロック内の旧行と新行を類似度スコアで最適にペアリングする。
 
 - 比較対象列における一致セル数 ÷ 比較対象列数 をスコアとする
 - スコアの高い順にグリーディーにペア確定（各行は1回のみ使用）
 - スコアが 0.0（比較対象列で1セルも一致しない）場合はペア化せず DELETE/INSERT として扱う
-- ペア確定した行はMODIFYとして処理
+
+### 5-6. キーJOINモード（`diff_mode="key"`）
+
+`key_cols` で指定した列の値をキーとして、旧行・新行をJOINして差分を判定する。
+行の並び替えがあっても、同じキーの行同士が正確に対応付けられる。
+
+**処理フロー**
+
+```
+old_map = { (key_cols の値のtuple): row }  for row in old_rows
+new_map = { (key_cols の値のtuple): row }  for row in new_rows
+
+all_keys = old の出現順 ∪ (new にのみ存在するキーを末尾に追加)
+
+for key in all_keys:
+    旧有・新有 → セル単位比較 → EQUAL または MODIFY
+    旧有・新無 → DELETE
+    旧無・新有 → INSERT
+```
+
+**制約・フォールバック**
+
+| 状況 | 扱い |
+|---|---|
+| キー値に None を含む行 | キー扱いせず末尾でLCSにフォールバック |
+| キー重複行（先頭以外） | キー扱いせず末尾でLCSにフォールバック |
+| `key_cols` が空の場合 | LCSモードにフォールバック |
+
+キー列自体の値が変わった行は「DELETE + INSERT」として表示される（キーが変わったら別行扱い）。
 
 ### 5-7. セルレベルdiff（MODIFYの行のみ）
 
@@ -221,13 +257,22 @@ excel-diff.exe --split <ブック.xlsx> [--prefix TEXT] [--suffix TEXT] [--outpu
 
 ### 6-2. 列範囲の指定形式
 
+**範囲指定（`parse_col_spec`）** — `--include-cols` などに使用
+
 | 指定例 | 対象列 |
 |---|---|
 | `A` | A列のみ |
 | `A:C` | A〜C列（連続） |
 | `A,C,E` | A・C・E列（飛び地） |
 | `A:C,E` | A〜C列とE列（混在） |
-| `1,3:5` | 1列目・3〜5列目（1始まり整数も使用可） |
+
+**順序付きリスト（`parse_col_list`）** — `--key-cols` などに使用
+
+| 指定例 | 結果 |
+|---|---|
+| `C` | [C列] |
+| `B,C` | [B列, C列]（指定順を保持） |
+| `C,B` | [C列, B列]（複合キーの順序が意味を持つ場合に使用） |
 
 ### 6-3. 指定方法
 
@@ -301,6 +346,17 @@ excel-diff.exe old.xlsx new.xlsx --include-cols "B:U"
 }
 ```
 
+キーJOINモードも同一設定ファイルに記述できる：
+
+```json
+{
+  "diff_mode": "key",
+  "key_cols": ["B", "C"],
+  "include_cols": "B:U",
+  "matchers": []
+}
+```
+
 **旧形式（後方互換: 配列形式）**
 
 ```json
@@ -367,12 +423,12 @@ excel-diff.exe old.xlsx new.xlsx --include-cols "B:U"
 - INSERT行: 左パネルにグレー空行（phantom行）、右パネルに緑背景
 - MODIFY行: 両パネルに白背景で表示、**変更セルのみ**黄背景
 - EQUAL行: 両パネルに白背景
-- phantom行と実行の高さを equalizeRowHeights() で均一化
+- phantom行と実行の高さを `equalizeRowHeights()` で均一化
 
 ### 8-3. 上下表示
 
 「上下表示」ボタンで切替。旧ファイルパネルが上、新ファイルパネルが下に並ぶ。
-各パネルは最大 40vh で独立スクロール。
+各パネルは独立スクロール（高さはJSで動的計算）。
 
 ### 8-4. 色分け
 
@@ -413,9 +469,18 @@ excel-diff.exe old.xlsx new.xlsx --include-cols "B:U"
 - 列ヘッダ（A/B/C...）: 各パネル内でスティッキー（縦スクロール中も固定）
 - 行番号列: 各パネル内でスティッキー（横スクロール中も固定）
 
-### 8-7. デフォルト動作
+### 8-7. パネル高さの動的計算
 
-ページ読み込み時に自動的に `toggleEqual()` を実行し、変更行のみ表示の状態で開く。
+`resizePanels()` JS関数がページ読み込み時・ウィンドウリサイズ時・レイアウト切替時に実行される。
+トップバー・インフォバー・シートヘッダ・ファイルタイトル行の実測値から各 `.panel` の `height` を直接設定する。
+これにより行数が多い場合でも水平スクロールバーが常にビューポート内のパネル底部に表示される。
+
+### 8-8. デフォルト動作
+
+ページ読み込み時に自動的に以下を実行：
+1. `resizePanels()` — パネル高さを計算・設定
+2. `equalizeRowHeights()` — 左右パネルのphantom行と実行の高さを揃える
+3. `toggleEqual()` — 変更行のみ表示の状態で開く
 
 ---
 
@@ -450,6 +515,8 @@ DiffConfig
   matchers: list[ColumnMatcher]
   global_col_filter: Optional[set[int]]   全シート共通フィルタ（0始まり列インデックス集合）
   sheet_col_filters: dict[str, set[int]]  シート別フィルタ（グローバルより優先）
+  diff_mode: str                          "lcs"（デフォルト）または "key"
+  key_cols: list[int]                     キーJOIN時のキー列（0始まり、順序保持）
   get_col_filter(sheet_name) → Optional[set[int]]
 
 CellDiff
@@ -594,12 +661,12 @@ pyinstaller --onefile --name excel-diff --clean excel_diff/__main__.py
 
 詳細は [TODO.md](TODO.md) を参照。
 
-| ID | 内容 | 優先度 |
+| ID | 内容 | 状態 |
 |---|---|---|
-| TODO-001 | キーJOIN方式の差分モード追加（`--diff-mode key` / `--key-cols`） | 高 |
-| TODO-002 | 水平スクロールバーが一画面未満の場合に表示されない問題 | 中 |
-| — | 列レベルのLCS diff（列挿入・削除への対応） | 低 |
-| — | GUIモード（ファイル選択ダイアログ） | 低 |
-| — | .xls 形式のサポート | 低 |
-| — | マッチャータイプの追加（正規表現、数値許容誤差など） | 低 |
-| — | `--sheet` の複数指定 | 低 |
+| TODO-001 | キーJOIN方式の差分モード追加（`--diff-mode key` / `--key-cols`） | ✅ 完了 |
+| TODO-002 | 水平スクロールバーが一画面未満の場合に表示されない問題 | ✅ 完了 |
+| — | 列レベルのLCS diff（列挿入・削除への対応） | 低優先度 |
+| — | GUIモード（ファイル選択ダイアログ） | 低優先度 |
+| — | .xls 形式のサポート | 低優先度 |
+| — | マッチャータイプの追加（正規表現、数値許容誤差など） | 低優先度 |
+| — | `--sheet` の複数指定 | 低優先度 |
