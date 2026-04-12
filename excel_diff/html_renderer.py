@@ -165,6 +165,7 @@ body {
   flex-direction: row;
   min-height: 300px;
   max-height: calc(100vh - 80px);
+  overflow: hidden;  /* これがないと max-height を超えてパネルが伸び、スクロールバーが画面外に出る */
 }
 
 /* タイトル＋パネルを縦に並べるラッパー */
@@ -272,6 +273,7 @@ body {
 .sheet-panels.layout-vertical {
   flex-direction: column;
   max-height: none;
+  overflow: visible;
 }
 .sheet-panels.layout-vertical .panel-wrapper {
   border-right: none;
