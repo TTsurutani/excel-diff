@@ -400,18 +400,20 @@ def _e(text) -> str:
     return html.escape(str(text) if text is not None else "")
 
 
-# CR の実体文字（\r）と、テキストとして埋め込まれた表現（x000D / x000d など）を除去
-_CTRL_RE = re.compile(r'\r|[xX]000[dD]')
-
 def _strip_ctrl(v) -> str:
-    """制御コード（CR 等）を除去して文字列化する。
-    - 実際の CR 文字（\\r / \\x0D）
-    - テキストとして埋め込まれた 'x000D' / 'x000d' 表現
-    の両方を取り除く。
+    """改行コードを正規化し、制御コードを除去して文字列化する。
+    - テキスト埋め込みの 'x000D' / 'x000d' を削除
+    - CR+LF (\\r\\n) → LF (\\n) に統一
+    - 単独 CR (\\r) → LF (\\n) に統一
+    これにより旧ファイルと新ファイルの改行コード差異を吸収する。
     """
     if v is None:
         return ""
-    return _CTRL_RE.sub('', str(v))
+    s = str(v)
+    s = re.sub(r'[xX]000[dD]', '', s)  # テキスト表現の x000D を除去
+    s = s.replace('\r\n', '\n')         # CRLF → LF
+    s = s.replace('\r', '\n')           # CR のみ → LF
+    return s
 
 
 def _render_cell_value(cell: Optional[CellData]) -> str:

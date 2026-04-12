@@ -74,19 +74,19 @@ def _pad_cells(cells: list[CellData], target_len: int) -> list[CellData]:
     return cells + [CellData(None)] * (target_len - len(cells))
 
 
-# CR の実体文字と、テキストとして埋め込まれた表現を両方除去
-_CTRL_RE = re.compile(r'\r|[xX]000[dD]')
-
 def _normalize_val(v: Any) -> Any:
     """
     セル値を比較用に正規化する。
     - None と空文字列は同一視（None に統一）
-    - CR 文字（\\r / \\x0D）およびテキスト表現 'x000D' を除去
+    - テキスト埋め込みの 'x000D' を除去
+    - CR+LF / CR のみ → LF に統一（改行コード差異を吸収）
     """
     if v is None:
         return None
     if isinstance(v, str):
-        v = _CTRL_RE.sub('', v)
+        v = re.sub(r'[xX]000[dD]', '', v)  # テキスト表現の x000D を除去
+        v = v.replace('\r\n', '\n')          # CRLF → LF
+        v = v.replace('\r', '\n')            # CR のみ → LF
     return None if v == "" else v
 
 
