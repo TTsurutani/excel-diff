@@ -230,6 +230,20 @@ body {
 
 /* 取り消し線 */
 .strike { text-decoration: line-through; }
+
+/* 列固定（JS で動的に付与） */
+.col-frozen {
+  position: sticky;
+  z-index: 4;
+}
+/* 固定列の背景を確保（行色に合わせて継承） */
+.row-equal    .col-frozen { background: #fff; }
+.row-deleted  .col-frozen { background: #ffeef0; }
+.row-inserted .col-frozen { background: #e6ffed; }
+.row-modified .col-frozen { background: #fff; }
+.row-phantom  .col-frozen { background: #f0f0f0; }
+.col-frozen.cell-modified { background: #fff8c5 !important; }
+.col-frozen.cell-excluded { background: #f8f8f8 !important; }
 """
 
 # ---------------------------------------------------------------------------
@@ -237,7 +251,7 @@ body {
 # ---------------------------------------------------------------------------
 
 _JS = """
-// 左右パネルのスクロール同期
+// ── 垂直スクロール同期（水平は独立スクロール） ──────────────────────────
 document.querySelectorAll('.panel-pair').forEach(function(pair) {
   var panels = pair.querySelectorAll('.panel');
   if (panels.length < 2) return;
@@ -245,19 +259,47 @@ document.querySelectorAll('.panel-pair').forEach(function(pair) {
   var syncing = false;
   left.addEventListener('scroll', function() {
     if (syncing) return; syncing = true;
-    right.scrollTop  = left.scrollTop;
-    right.scrollLeft = left.scrollLeft;
+    right.scrollTop = left.scrollTop;   // 垂直のみ同期
     syncing = false;
   });
   right.addEventListener('scroll', function() {
     if (syncing) return; syncing = true;
-    left.scrollTop  = right.scrollTop;
-    left.scrollLeft = right.scrollLeft;
+    left.scrollTop = right.scrollTop;   // 垂直のみ同期
     syncing = false;
   });
 });
 
-// EQUAL 行の表示トグル
+// ── 行高さの均一化（DELETE/INSERT の phantom 行と実行の高さを揃える） ────
+function equalizeRowHeights() {
+  document.querySelectorAll('.panel-pair').forEach(function(pair) {
+    var panels = Array.from(pair.querySelectorAll('.panel'));
+    if (panels.length < 2) return;
+    var lMap = {}, rMap = {};
+    panels[0].querySelectorAll('tbody tr[data-row]').forEach(function(tr) {
+      lMap[tr.getAttribute('data-row')] = tr;
+    });
+    panels[1].querySelectorAll('tbody tr[data-row]').forEach(function(tr) {
+      rMap[tr.getAttribute('data-row')] = tr;
+    });
+    // いったんリセット
+    Object.values(lMap).concat(Object.values(rMap)).forEach(function(tr) {
+      tr.style.height = '';
+    });
+    // 高さを揃える
+    Object.keys(lMap).forEach(function(k) {
+      var ltr = lMap[k], rtr = rMap[k];
+      if (!ltr || !rtr) return;
+      var lh = ltr.offsetHeight, rh = rtr.offsetHeight;
+      if (lh !== rh) {
+        var maxH = Math.max(lh, rh) + 'px';
+        ltr.style.height = maxH;
+        rtr.style.height = maxH;
+      }
+    });
+  });
+}
+
+// ── EQUAL 行の表示トグル ─────────────────────────────────────────────────
 function toggleEqual() {
   var rows = document.querySelectorAll('.row-equal, .row-phantom');
   var btn = document.getElementById('btnToggleEqual');
@@ -265,9 +307,10 @@ function toggleEqual() {
   rows.forEach(function(r) { r.style.display = showing ? 'none' : ''; });
   btn.setAttribute('data-showing', showing ? 'false' : 'true');
   btn.textContent = showing ? '全行を表示' : '変更行のみ表示';
+  equalizeRowHeights();
 }
 
-// 左右 ⇄ 上下 レイアウト切替
+// ── 左右 ⇄ 上下 レイアウト切替 ─────────────────────────────────────────
 function toggleLayout() {
   var panels = document.querySelectorAll('.sheet-panels');
   var btn = document.getElementById('btnToggleLayout');
@@ -281,7 +324,60 @@ function toggleLayout() {
   });
   btn.setAttribute('data-layout', isVertical ? 'horizontal' : 'vertical');
   btn.textContent = isVertical ? '上下表示に切替' : '左右表示に切替';
+  setTimeout(equalizeRowHeights, 50);
 }
+
+// ── 先頭N列を固定 ────────────────────────────────────────────────────────
+var _colFreezeActive = false;
+var FREEZE_COLS = 3;  // 固定するデータ列数（A, B, C）
+
+function toggleFreezeColumns() {
+  _colFreezeActive = !_colFreezeActive;
+  var btn = document.getElementById('btnFreezeCol');
+  if (_colFreezeActive) {
+    applyFreezeColumns(FREEZE_COLS);
+    btn.textContent = '列固定 解除';
+    btn.style.background = '#ddf4ff';
+  } else {
+    removeFreezeColumns();
+    btn.textContent = '先頭' + FREEZE_COLS + '列を固定';
+    btn.style.background = '';
+  }
+}
+
+function applyFreezeColumns(numCols) {
+  document.querySelectorAll('.panel-pair .diff-table').forEach(function(table) {
+    // 1行目のセル幅から各列の left オフセットを計算
+    var firstRow = table.querySelector('thead tr') || table.querySelector('tr');
+    if (!firstRow) return;
+    var firstCells = Array.from(firstRow.querySelectorAll('td, th'));
+    // col 0 = line-num（CSS で既に sticky、left:0）
+    // col 1〜numCols をJSで sticky にする
+    var lefts = [0];
+    for (var i = 0; i < numCols && i < firstCells.length - 1; i++) {
+      lefts.push(lefts[i] + firstCells[i].getBoundingClientRect().width);
+    }
+    table.querySelectorAll('tr').forEach(function(tr) {
+      var cells = Array.from(tr.querySelectorAll('td, th'));
+      for (var i = 1; i <= numCols && i < cells.length; i++) {
+        cells[i].classList.add('col-frozen');
+        cells[i].style.left = lefts[i] + 'px';
+      }
+    });
+  });
+}
+
+function removeFreezeColumns() {
+  document.querySelectorAll('.col-frozen').forEach(function(cell) {
+    cell.classList.remove('col-frozen');
+    cell.style.left = '';
+  });
+}
+
+// ── ページ読み込み後に行高さを均一化 ────────────────────────────────────
+window.addEventListener('load', function() {
+  equalizeRowHeights();
+});
 """
 
 # ---------------------------------------------------------------------------
@@ -341,10 +437,10 @@ def _render_cell_pair_diff(
 # 行レンダリング（左パネル用 / 右パネル用を別々に生成）
 # ---------------------------------------------------------------------------
 
-def _phantom_tr(max_cols: int) -> str:
+def _phantom_tr(max_cols: int, row_idx: int = 0) -> str:
     """対応行のない側に挿入する空行"""
     empty_tds = "".join(f"<td></td>" for _ in range(max_cols))
-    return f'<tr class="row-phantom"><td class="line-num"></td>{empty_tds}</tr>'
+    return f'<tr class="row-phantom" data-row="{row_idx}"><td class="line-num"></td>{empty_tds}</tr>'
 
 
 def _build_tds(
@@ -372,10 +468,12 @@ def _render_row_pair(
     row_diff: RowDiff,
     max_cols: int,
     col_filter: Optional[set[int]] = None,
+    row_idx: int = 0,
 ) -> tuple[str, str]:
     """1つの RowDiff から (左パネル用 <tr>, 右パネル用 <tr>) を返す。"""
     tag = row_diff.tag
     changed = {cd.col_idx: cd for cd in row_diff.cell_diffs}
+    ri = f' data-row="{row_idx}"'
 
     # MODIFY: 文字 diff を事前計算
     char_diffs: dict[int, tuple[str, str]] = {}
@@ -386,26 +484,26 @@ def _render_row_pair(
     if tag == RowTag.EQUAL:
         tds_l = _build_tds(row_diff.old_row, max_cols, {}, col_filter)
         tds_r = _build_tds(row_diff.new_row, max_cols, {}, col_filter)
-        left_tr  = f'<tr class="row-equal">{tds_l}</tr>'
-        right_tr = f'<tr class="row-equal">{tds_r}</tr>'
+        left_tr  = f'<tr class="row-equal"{ri}>{tds_l}</tr>'
+        right_tr = f'<tr class="row-equal"{ri}>{tds_r}</tr>'
 
     elif tag == RowTag.DELETE:
         tds_l = _build_tds(row_diff.old_row, max_cols, {}, col_filter)
-        left_tr  = f'<tr class="row-deleted">{tds_l}</tr>'
-        right_tr = _phantom_tr(max_cols)
+        left_tr  = f'<tr class="row-deleted"{ri}>{tds_l}</tr>'
+        right_tr = _phantom_tr(max_cols, row_idx)
 
     elif tag == RowTag.INSERT:
         tds_r = _build_tds(row_diff.new_row, max_cols, {}, col_filter)
-        left_tr  = _phantom_tr(max_cols)
-        right_tr = f'<tr class="row-inserted">{tds_r}</tr>'
+        left_tr  = _phantom_tr(max_cols, row_idx)
+        right_tr = f'<tr class="row-inserted"{ri}>{tds_r}</tr>'
 
     else:  # MODIFY
         old_map = {i: v[0] for i, v in char_diffs.items()}
         new_map = {i: v[1] for i, v in char_diffs.items()}
         tds_l = _build_tds(row_diff.old_row, max_cols, old_map, col_filter)
         tds_r = _build_tds(row_diff.new_row, max_cols, new_map, col_filter)
-        left_tr  = f'<tr class="row-modified">{tds_l}</tr>'
-        right_tr = f'<tr class="row-modified">{tds_r}</tr>'
+        left_tr  = f'<tr class="row-modified"{ri}>{tds_l}</tr>'
+        right_tr = f'<tr class="row-modified"{ri}>{tds_r}</tr>'
 
     return left_tr, right_tr
 
@@ -443,8 +541,8 @@ def _render_sheet(sheet_diff: SheetDiff, old_path: str, new_path: str) -> str:
 
     left_rows: list[str] = []
     right_rows: list[str] = []
-    for rd in sheet_diff.row_diffs:
-        lt, rt = _render_row_pair(rd, max_cols, col_filter)
+    for i, rd in enumerate(sheet_diff.row_diffs):
+        lt, rt = _render_row_pair(rd, max_cols, col_filter, i)
         left_rows.append(lt)
         right_rows.append(rt)
 
@@ -550,6 +648,7 @@ def render(file_diff: FileDiff) -> str:
     {nav_items}
     <button class="btn" id="btnToggleEqual" data-showing="true" onclick="toggleEqual()">変更行のみ表示</button>
     <button class="btn" id="btnToggleLayout" data-layout="horizontal" onclick="toggleLayout()">上下表示に切替</button>
+    <button class="btn" id="btnFreezeCol" onclick="toggleFreezeColumns()">先頭3列を固定</button>
   </span>
 </div>
 <div class="sheets-container">

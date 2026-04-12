@@ -73,6 +73,11 @@ def _pad_cells(cells: list[CellData], target_len: int) -> list[CellData]:
     return cells + [CellData(None)] * (target_len - len(cells))
 
 
+def _normalize_val(v: Any) -> Any:
+    """None と空文字列を同一視する（どちらも None に正規化）。"""
+    return None if (v is None or v == "") else v
+
+
 def _cell_equal(
     old_cell: CellData,
     new_cell: CellData,
@@ -87,10 +92,13 @@ def _cell_equal(
         if m.applies_to(sheet_name, col_idx):
             return m.matches(old_cell.value, new_cell.value)
 
-    # デフォルト比較
+    # デフォルト比較（None と空文字列は同一視）
     if include_strike:
-        return old_cell.value == new_cell.value and old_cell.strikethrough == new_cell.strikethrough
-    return old_cell.value == new_cell.value
+        return (
+            _normalize_val(old_cell.value) == _normalize_val(new_cell.value)
+            and old_cell.strikethrough == new_cell.strikethrough
+        )
+    return _normalize_val(old_cell.value) == _normalize_val(new_cell.value)
 
 
 def _normalize_row_key(
