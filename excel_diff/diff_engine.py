@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from enum import Enum
@@ -73,16 +74,19 @@ def _pad_cells(cells: list[CellData], target_len: int) -> list[CellData]:
     return cells + [CellData(None)] * (target_len - len(cells))
 
 
+# CR の実体文字と、テキストとして埋め込まれた表現を両方除去
+_CTRL_RE = re.compile(r'\r|[xX]000[dD]')
+
 def _normalize_val(v: Any) -> Any:
     """
     セル値を比較用に正規化する。
     - None と空文字列は同一視（None に統一）
-    - 文字列中の制御コード（\\r など）を除去
+    - CR 文字（\\r / \\x0D）およびテキスト表現 'x000D' を除去
     """
     if v is None:
         return None
     if isinstance(v, str):
-        v = v.replace('\r', '')   # CR (\x000D) を除去
+        v = _CTRL_RE.sub('', v)
     return None if v == "" else v
 
 

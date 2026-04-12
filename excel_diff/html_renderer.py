@@ -6,6 +6,7 @@ WinMerge スタイル: 左右分割パネル + 同期スクロール
 from __future__ import annotations
 
 import html
+import re
 from datetime import datetime
 from difflib import SequenceMatcher
 from typing import Optional
@@ -399,12 +400,18 @@ def _e(text) -> str:
     return html.escape(str(text) if text is not None else "")
 
 
+# CR の実体文字（\r）と、テキストとして埋め込まれた表現（x000D / x000d など）を除去
+_CTRL_RE = re.compile(r'\r|[xX]000[dD]')
+
 def _strip_ctrl(v) -> str:
-    """制御コード（\r など）を除去して文字列化する。"""
+    """制御コード（CR 等）を除去して文字列化する。
+    - 実際の CR 文字（\\r / \\x0D）
+    - テキストとして埋め込まれた 'x000D' / 'x000d' 表現
+    の両方を取り除く。
+    """
     if v is None:
         return ""
-    s = str(v)
-    return s.replace('\r', '')   # \x000D (CR) などを除去
+    return _CTRL_RE.sub('', str(v))
 
 
 def _render_cell_value(cell: Optional[CellData]) -> str:
