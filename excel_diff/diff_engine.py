@@ -438,6 +438,33 @@ def diff_files(
         matcher_count=len(effective_matchers),
     )
 
+    # シート名が異なる場合は位置で突き合わせる。
+    # 両ブックのシート数が同じ場合: 順番通りにペアを作り、新側の名前を旧側に合わせる。
+    # シート数が異なる場合: 名前一致を優先し、残りを位置でフォールバック。
+    old_names = list(old_sheets.keys())
+    new_names = list(new_sheets.keys())
+    if old_names and new_names and old_names != new_names:
+        if len(old_names) == len(new_names):
+            # 同数 → 全て位置でペア（名前は旧側に統一）
+            new_sheets = {old_names[i]: new_sheets[new_names[i]] for i in range(len(old_names))}
+        else:
+            # 名前一致を優先し、残りを順番でペア
+            matched_new: set[str] = set()
+            remapped: dict[str, "SheetData"] = {}
+            for name in old_names:
+                if name in new_sheets:
+                    remapped[name] = new_sheets[name]
+                    matched_new.add(name)
+            unmatched_old = [n for n in old_names if n not in remapped]
+            unmatched_new = [n for n in new_names if n not in matched_new]
+            for o, n in zip(unmatched_old, unmatched_new):
+                remapped[o] = new_sheets[n]
+            # 新側にしかないシートは名前そのまま残す
+            for name in new_names:
+                if name not in matched_new and name not in [n for _, n in zip(unmatched_old, unmatched_new)]:
+                    remapped[name] = new_sheets[name]
+            new_sheets = remapped
+
     all_names: list[str] = list(dict.fromkeys(list(old_sheets.keys()) + list(new_sheets.keys())))
 
     for name in all_names:

@@ -9,6 +9,9 @@ excel-diff CLI エントリポイント。
   # フォルダ一括比較（完全一致）
   python -m excel_diff --dir old_dir/ new_dir/
 
+  # フォルダ一括比較（ペアJSON使用）
+  python -m excel_diff --dir old_dir/ new_dir/ --pairs pairs.json
+
   # フォルダ一括比較（パターン使用）
   python -m excel_diff --dir old_dir/ new_dir/ --pattern monthly
 
@@ -48,6 +51,7 @@ def _build_parser() -> argparse.ArgumentParser:
   excel-diff old.xlsx new.xlsx
   excel-diff old.xlsx new.xlsx -o diff.html --open
   excel-diff --dir old_dir new_dir
+  excel-diff --dir old_dir new_dir --pairs pairs.json
   excel-diff --dir old_dir new_dir --pattern monthly
   excel-diff --discover old_dir new_dir -o pairs.json
   excel-diff --gen-pattern pairs.json --id monthly --name "月次レポート"
@@ -102,6 +106,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="--split: 出力ファイル名の後置文字列（拡張子の前）")
 
     # --- パターン指定（フォルダ比較時） ---
+    p.add_argument("--pairs", metavar="FILE",
+                   help="フォルダ比較時に使用するペアJSONファイル（--discover で生成したもの）")
     p.add_argument("--pattern", metavar="ID",
                    help="フォルダ比較時に使用するパターンID")
     p.add_argument("--patterns-file", metavar="FILE", default="patterns.json",
@@ -465,8 +471,15 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
 
     config = _build_config(args)
 
-    # ペアリング
-    if args.pattern:
+    # ペアリング（--pairs > --pattern > 完全一致 の優先順）
+    if args.pairs:
+        from .file_pairing import load_pairs
+        if not os.path.isfile(args.pairs):
+            print(f"エラー: ペアファイルが見つかりません: {args.pairs}", file=sys.stderr)
+            sys.exit(1)
+        pairs = load_pairs(args.pairs)
+        print(f"ペアファイル使用: {args.pairs}  ({len([p for p in pairs if p.old_name and p.new_name])} ペア)")
+    elif args.pattern:
         from .patterns import PatternStore
         store = PatternStore(args.patterns_file)
         pat = store.get(args.pattern)
@@ -510,8 +523,16 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
         old_path = os.path.join(old_dir, pair.old_name)
         new_path = os.path.join(new_dir, pair.new_name)
 
-        old_sheets = read_workbook(old_path, args.strikethrough, args.sheet) if os.path.isfile(old_path) else {}
-        new_sheets = read_workbook(new_path, args.strikethrough, args.sheet) if os.path.isfile(new_path) else {}
+        try:
+            old_sheets = read_workbook(old_path, args.strikethrough, args.sheet) if os.path.isfile(old_path) else {}
+        except Exception as e:
+            print(f"  警告: 旧ファイルを読み込めません（空として扱います）: {pair.old_name}  ({e})")
+            old_sheets = {}
+        try:
+            new_sheets = read_workbook(new_path, args.strikethrough, args.sheet) if os.path.isfile(new_path) else {}
+        except Exception as e:
+            print(f"  警告: 新ファイルを読み込めません（空として扱います）: {pair.new_name}  ({e})")
+            new_sheets = {}
 
         file_diff = diff_files(
             old_sheets, new_sheets,
