@@ -378,7 +378,7 @@ function toggleEqual() {
   rows.forEach(function(r) { r.style.display = showing ? 'none' : ''; });
   btn.setAttribute('data-showing', showing ? 'false' : 'true');
   btn.classList.toggle('btn-on', showing);   // フィルタ中 = ON（青くなっていれば絞り込み中）
-  btn.title = showing ? '全行を表示する（現在: 変更行のみ表示中）' : '変更のある行のみ絞り込む（現在: 全行表示中）';
+  btn.title = showing ? '押下で全行表示に変更（現在: 変更行のみ表示中）' : '押下で変更行のみ表示に変更（現在: 全行表示中）';
   equalizeRowHeights();
 }
 
@@ -390,7 +390,7 @@ function toggleLayout() {
   panels.forEach(function(p) { p.classList.toggle('layout-vertical', !isVertical); });
   btn.setAttribute('data-layout', isVertical ? 'horizontal' : 'vertical');
   btn.classList.toggle('btn-on', !isVertical);  // 上下表示中 = ON（青くなっていれば上下配置中）
-  btn.title = isVertical ? '上下表示に切り替える（現在: 左右並列表示中）' : '左右並列表示に戻す（現在: 上下表示中）';
+  btn.title = isVertical ? '押下で上下表示に変更（現在: 左右並列表示中）' : '押下で左右並列表示に変更（現在: 上下表示中）';
   setTimeout(function() { resizePanels(); equalizeRowHeights(); }, 50);
 }
 
@@ -767,9 +767,9 @@ def render(file_diff: FileDiff) -> str:
     <div class="toolbar-group">
       <span class="toolbar-group-label">表示</span>
       <button class="btn" id="btnToggleEqual" data-showing="true"
-              onclick="toggleEqual()" title="変更のある行のみ絞り込む（現在: 全行表示中）">変更行のみ</button>
+              onclick="toggleEqual()" title="押下で変更行のみ表示に変更（現在: 全行表示中）">変更行のみ</button>
       <button class="btn" id="btnToggleLayout" data-layout="horizontal"
-              onclick="toggleLayout()" title="上下表示に切り替える（現在: 左右並列表示中）">上下表示</button>
+              onclick="toggleLayout()" title="押下で上下表示に変更（現在: 左右並列表示中）">上下表示</button>
     </div>
     <div class="toolbar-group">
       <span class="toolbar-group-label">スクロール</span>
