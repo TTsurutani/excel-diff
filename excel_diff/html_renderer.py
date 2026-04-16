@@ -372,6 +372,7 @@ function toggleEqual() {
   rows.forEach(function(r) { r.style.display = showing ? 'none' : ''; });
   btn.setAttribute('data-showing', showing ? 'false' : 'true');
   btn.classList.toggle('btn-on', showing);   // フィルタ中 = ON
+  btn.textContent = showing ? '全行表示' : '変更行のみ';
   equalizeRowHeights();
 }
 
@@ -383,6 +384,7 @@ function toggleLayout() {
   panels.forEach(function(p) { p.classList.toggle('layout-vertical', !isVertical); });
   btn.setAttribute('data-layout', isVertical ? 'horizontal' : 'vertical');
   btn.classList.toggle('btn-on', !isVertical);  // 上下表示中 = ON
+  btn.textContent = isVertical ? '上下表示' : '左右表示';
   setTimeout(function() { resizePanels(); equalizeRowHeights(); }, 50);
 }
 
@@ -758,7 +760,7 @@ def render(file_diff: FileDiff) -> str:
     <div class="toolbar-sep"></div>
     <div class="toolbar-group">
       <span class="toolbar-group-label">表示</span>
-      <button class="btn" id="btnToggleEqual" data-showing="false"
+      <button class="btn" id="btnToggleEqual" data-showing="true"
               onclick="toggleEqual()" title="変更のある行のみ表示 / 全行表示を切替">変更行のみ</button>
       <button class="btn" id="btnToggleLayout" data-layout="horizontal"
               onclick="toggleLayout()" title="左右 / 上下パネル配置を切替">上下表示</button>
