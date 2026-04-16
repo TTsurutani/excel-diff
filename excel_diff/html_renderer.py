@@ -469,7 +469,6 @@ window.addEventListener('resize', resizePanels);
 window.addEventListener('load', function() {
   resizePanels();
   equalizeRowHeights();
-  toggleEqual();   // デフォルトで「変更行のみ表示」
 });
 """
 
@@ -759,7 +758,7 @@ def render(file_diff: FileDiff) -> str:
     <div class="toolbar-sep"></div>
     <div class="toolbar-group">
       <span class="toolbar-group-label">表示</span>
-      <button class="btn" id="btnToggleEqual" data-showing="true"
+      <button class="btn" id="btnToggleEqual" data-showing="false"
               onclick="toggleEqual()" title="変更のある行のみ表示 / 全行表示を切替">変更行のみ</button>
       <button class="btn" id="btnToggleLayout" data-layout="horizontal"
               onclick="toggleLayout()" title="左右 / 上下パネル配置を切替">上下表示</button>
