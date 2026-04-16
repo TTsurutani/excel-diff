@@ -158,6 +158,124 @@ def _stats_line(delete: int, insert: int, modify: int) -> str:
     return "、".join(parts) if parts else "行変更なし"
 
 
+def _render_index_html(
+    results: list,
+    unmatched: list,
+    old_dir: str,
+    new_dir: str,
+) -> str:
+    """フォルダ比較のインデックスHTMLを生成して返す。
+
+    行数統計（削除・追加・変更）はファイル内の全シートを合算した値。
+    シート別の内訳は各差分HTMLを参照すること。
+    """
+    from datetime import datetime
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    no_diff = [(pair, fd, op) for pair, fd, op in results if not fd.has_differences]
+    has_diff = [(pair, fd, op) for pair, fd, op in results if fd.has_differences]
+
+    rows_html = ""
+    for pair, file_diff, out_path in has_diff:
+        delete, insert, modify = _diff_stats(file_diff)
+        label = pair.new_name
+        if pair.old_name != pair.new_name:
+            label = f"{pair.old_name} → {pair.new_name}"
+        stats = _stats_line(delete, insert, modify)
+        rel_path = Path(out_path).name
+        rows_html += (
+            f'<tr class="has-diff">'
+            f'<td class="filename">{label}</td>'
+            f'<td class="stats">{stats}</td>'
+            f'<td class="link"><a href="{rel_path}" target="_blank">開く</a></td>'
+            f'</tr>\n'
+        )
+
+    for pair, file_diff, out_path in no_diff:
+        label = pair.new_name
+        if pair.old_name != pair.new_name:
+            label = f"{pair.old_name} → {pair.new_name}"
+        rel_path = Path(out_path).name
+        rows_html += (
+            f'<tr class="no-diff">'
+            f'<td class="filename">{label}</td>'
+            f'<td class="stats">差分なし</td>'
+            f'<td class="link"><a href="{rel_path}" target="_blank">開く</a></td>'
+            f'</tr>\n'
+        )
+
+    unmatched_html = ""
+    if unmatched:
+        unmatched_html = "<h2>比較対象外</h2><ul>"
+        for p in unmatched:
+            if p.old_name and not p.new_name:
+                unmatched_html += f"<li>[旧のみ] {p.old_name}</li>"
+            elif p.new_name and not p.old_name:
+                unmatched_html += f"<li>[新のみ] {p.new_name}</li>"
+        unmatched_html += "</ul>"
+
+    total = len(results)
+    diff_count = len(has_diff)
+    nodiff_count = len(no_diff)
+
+    return f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>excel-diff インデックス</title>
+<style>
+  body {{ font-family: system-ui, sans-serif; margin: 0; background: #f6f8fa; color: #24292f; }}
+  .topbar {{ background: linear-gradient(mediumblue, darkblue); color: #fff; padding: 10px 20px; }}
+  .topbar h1 {{ margin: 0; font-size: 18px; }}
+  .topbar .meta {{ font-size: 12px; opacity: .8; margin-top: 4px; }}
+  .container {{ max-width: 960px; margin: 24px auto; padding: 0 16px; }}
+  .summary {{ display: flex; gap: 16px; margin-bottom: 20px; }}
+  .summary-card {{ background: #fff; border: 1px solid #d0d7de; border-radius: 6px;
+                   padding: 12px 20px; flex: 1; text-align: center; }}
+  .summary-card .num {{ font-size: 28px; font-weight: bold; }}
+  .summary-card.diff .num {{ color: #cf222e; }}
+  .summary-card.nodiff .num {{ color: #1a7f37; }}
+  .note {{ font-size: 12px; color: #57606a; margin-bottom: 12px; }}
+  table {{ width: 100%; border-collapse: collapse; background: #fff;
+           border: 1px solid #d0d7de; border-radius: 6px; overflow: hidden; }}
+  th {{ background: #f6f8fa; padding: 8px 12px; border-bottom: 1px solid #d0d7de;
+        text-align: left; font-size: 12px; color: #57606a; }}
+  td {{ padding: 7px 12px; border-bottom: 1px solid #f0f0f0; font-size: 13px; }}
+  tr:last-child td {{ border-bottom: none; }}
+  tr.has-diff .stats {{ color: #cf222e; font-weight: bold; }}
+  tr.no-diff {{ color: #8b949e; }}
+  td.link a {{ color: mediumblue; text-decoration: none; font-weight: bold; }}
+  td.link a:hover {{ text-decoration: underline; }}
+  h2 {{ font-size: 15px; margin-top: 24px; }}
+  ul {{ font-size: 13px; color: #57606a; }}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>excel-diff 比較結果インデックス</h1>
+  <div class="meta">
+    旧: {old_dir} &nbsp;→&nbsp; 新: {new_dir}<br>
+    生成: {now}
+  </div>
+</div>
+<div class="container">
+  <div class="summary">
+    <div class="summary-card diff"><div class="num">{diff_count}</div><div>差分あり</div></div>
+    <div class="summary-card nodiff"><div class="num">{nodiff_count}</div><div>差分なし</div></div>
+    <div class="summary-card"><div class="num">{total}</div><div>合計</div></div>
+  </div>
+  <p class="note">※ 行数はファイル内の全シートを合算した値です。シート別の内訳は各差分HTMLを参照してください。</p>
+  <table>
+    <thead><tr><th>ファイル</th><th>差分サマリ</th><th>詳細</th></tr></thead>
+    <tbody>
+{rows_html}    </tbody>
+  </table>
+  {unmatched_html}
+</div>
+</body>
+</html>"""
+
+
 def _build_config(args: argparse.Namespace):
     """引数から DiffConfig を組み立てて返す。"""
     from .matcher import load_config, DiffConfig, parse_col_spec, parse_col_list
@@ -572,8 +690,12 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
             elif p.new_name and not p.old_name:
                 print(f"  [新のみ] {p.new_name}")
 
-    if args.open and has_diff:
-        webbrowser.open(Path(has_diff[0][2]).resolve().as_uri())
+    # インデックスHTMLを常に生成してブラウザで開く
+    index_path = os.path.join(out_dir, "index.html")
+    with open(index_path, "w", encoding="utf-8") as f:
+        f.write(_render_index_html(results, unmatched, old_dir, new_dir))
+    print(f"\nインデックス → {index_path}")
+    webbrowser.open(Path(index_path).resolve().as_uri())
 
 
 # ---------------------------------------------------------------------------

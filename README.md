@@ -41,12 +41,21 @@ python -m excel_diff old.xlsx new.xlsx --open
 python -m excel_diff --dir old_dir new_dir
 ```
 
-同名ファイルをそれぞれ比較し、`old_dir_vs_new_dir/` フォルダに各ファイルの差分HTMLを出力する。
+同名ファイルをそれぞれ比較し、`old_dir_vs_new_dir/` フォルダに各ファイルの差分HTMLを出力する。  
+比較完了後、同フォルダに **`index.html`（比較結果一覧）を自動生成してブラウザで開く**。
 
 ```bat
 :: 出力先フォルダを指定する
 python -m excel_diff --dir old_dir new_dir --output-dir diffs/
 ```
+
+#### インデックスHTMLの内容
+
+- 差分あり／差分なしのファイル数サマリ
+- ファイルごとの差分サマリ（削除行数・追加行数・変更行数）
+- 各差分HTMLへのリンク（「開く」クリックで個別に参照）
+
+> **注意:** 差分行数はファイル内の**全シートを合算した値**です。シート別の内訳は各差分HTMLを参照してください。
 
 ---
 
