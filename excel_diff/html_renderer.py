@@ -266,6 +266,12 @@ body {
   grid-template-columns: 100%;
   grid-template-rows: max-content 1fr max-content 1fr;
 }
+/* DOM順: old-title(1) new-title(2) old-panel(3) new-panel(4)
+   縦表示では old-title→old-panel→new-title→new-panel の順に並べ直す */
+.sheet-panels.layout-vertical > :nth-child(1) { order: 1; }
+.sheet-panels.layout-vertical > :nth-child(3) { order: 2; }
+.sheet-panels.layout-vertical > :nth-child(2) { order: 3; }
+.sheet-panels.layout-vertical > :nth-child(4) { order: 4; }
 .sheet-panels.layout-vertical .panel {
   /* height は JS (resizePanels) で設定 */
   border-right: none;
