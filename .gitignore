@@ -19,6 +19,10 @@ tests/fixtures/
 # Excel の一時ファイル
 ~$*.xlsx
 
+# ツール出力（フォルダ比較・差分HTML）
+*_vs_*/
+gui_settings.json
+
 # OS
 .DS_Store
 Thumbs.db
