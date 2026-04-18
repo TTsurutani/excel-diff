@@ -177,31 +177,33 @@ def _render_index_html(
     no_diff = [(pair, fd, op) for pair, fd, op in results if not fd.has_differences]
     has_diff = [(pair, fd, op) for pair, fd, op in results if fd.has_differences]
 
+    old_label = Path(old_dir).name or old_dir
+    new_label = Path(new_dir).name or new_dir
+
     rows_html = ""
     for pair, file_diff, out_path in has_diff:
         delete, insert, modify = _diff_stats(file_diff)
-        label = pair.new_name
-        if pair.old_name != pair.new_name:
-            label = f"{pair.old_name} → {pair.new_name}"
-        stats = _stats_line(delete, insert, modify)
         rel_path = Path(out_path).name
         rows_html += (
             f'<tr class="has-diff">'
-            f'<td class="filename">{label}</td>'
-            f'<td class="stats">{stats}</td>'
+            f'<td class="filename">{pair.old_name}</td>'
+            f'<td class="filename">{pair.new_name}</td>'
+            f'<td class="num del">{delete}</td>'
+            f'<td class="num ins">{insert}</td>'
+            f'<td class="num mod">{modify}</td>'
             f'<td class="link"><a href="{rel_path}" target="_blank">開く</a></td>'
             f'</tr>\n'
         )
 
     for pair, file_diff, out_path in no_diff:
-        label = pair.new_name
-        if pair.old_name != pair.new_name:
-            label = f"{pair.old_name} → {pair.new_name}"
         rel_path = Path(out_path).name
         rows_html += (
             f'<tr class="no-diff">'
-            f'<td class="filename">{label}</td>'
-            f'<td class="stats">差分なし</td>'
+            f'<td class="filename">{pair.old_name}</td>'
+            f'<td class="filename">{pair.new_name}</td>'
+            f'<td class="num">−</td>'
+            f'<td class="num">−</td>'
+            f'<td class="num">−</td>'
             f'<td class="link"><a href="{rel_path}" target="_blank">開く</a></td>'
             f'</tr>\n'
         )
@@ -230,7 +232,7 @@ def _render_index_html(
   .topbar {{ background: linear-gradient(mediumblue, darkblue); color: #fff; padding: 10px 20px; }}
   .topbar h1 {{ margin: 0; font-size: 18px; }}
   .topbar .meta {{ font-size: 12px; opacity: .8; margin-top: 4px; }}
-  .container {{ max-width: 960px; margin: 24px auto; padding: 0 16px; }}
+  .container {{ max-width: 1100px; margin: 24px auto; padding: 0 16px; }}
   .summary {{ display: flex; gap: 16px; margin-bottom: 20px; }}
   .summary-card {{ background: #fff; border: 1px solid #d0d7de; border-radius: 6px;
                    padding: 12px 20px; flex: 1; text-align: center; }}
@@ -238,14 +240,21 @@ def _render_index_html(
   .summary-card.diff .num {{ color: #cf222e; }}
   .summary-card.nodiff .num {{ color: #1a7f37; }}
   .note {{ font-size: 12px; color: #57606a; margin-bottom: 12px; }}
-  table {{ width: 100%; border-collapse: collapse; background: #fff;
-           border: 1px solid #d0d7de; border-radius: 6px; overflow: hidden; }}
-  th {{ background: #f6f8fa; padding: 8px 12px; border-bottom: 1px solid #d0d7de;
-        text-align: left; font-size: 12px; color: #57606a; }}
+  .table-wrapper {{ border: 1px solid #d0d7de; border-radius: 6px; overflow: hidden;
+                    max-height: calc(100vh - 260px); overflow-y: auto; }}
+  table {{ width: 100%; border-collapse: collapse; background: #fff; }}
+  thead th {{ position: sticky; top: 0; z-index: 1;
+              background: #f6f8fa; padding: 8px 12px;
+              border-bottom: 2px solid #d0d7de;
+              text-align: left; font-size: 12px; color: #57606a; white-space: nowrap; }}
   td {{ padding: 7px 12px; border-bottom: 1px solid #f0f0f0; font-size: 13px; }}
   tr:last-child td {{ border-bottom: none; }}
-  tr.has-diff .stats {{ color: #cf222e; font-weight: bold; }}
+  td.num {{ text-align: right; width: 52px; white-space: nowrap; }}
+  tr.has-diff td.del {{ color: #cf222e; font-weight: bold; }}
+  tr.has-diff td.ins {{ color: #1a7f37; font-weight: bold; }}
+  tr.has-diff td.mod {{ color: #9a6700; font-weight: bold; }}
   tr.no-diff {{ color: #8b949e; }}
+  td.link {{ width: 48px; text-align: center; }}
   td.link a {{ color: mediumblue; text-decoration: none; font-weight: bold; }}
   td.link a:hover {{ text-decoration: underline; }}
   h2 {{ font-size: 15px; margin-top: 24px; }}
@@ -267,11 +276,22 @@ def _render_index_html(
     <div class="summary-card"><div class="num">{total}</div><div>合計</div></div>
   </div>
   <p class="note">※ 行数はファイル内の全シートを合算した値です。シート別の内訳は各差分HTMLを参照してください。</p>
-  <table>
-    <thead><tr><th>ファイル</th><th>差分サマリ</th><th>詳細</th></tr></thead>
-    <tbody>
-{rows_html}    </tbody>
-  </table>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>{old_label}</th>
+          <th>{new_label}</th>
+          <th style="text-align:right">削除</th>
+          <th style="text-align:right">追加</th>
+          <th style="text-align:right">変更</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+{rows_html}      </tbody>
+    </table>
+  </div>
   {unmatched_html}
 </div>
 </body>
