@@ -41,7 +41,22 @@ _DEFAULT: dict[str, Any] = {
     },
 }
 
-_settings_path = Path(__file__).parent.parent / "gui_settings.json"
+def _data_dir() -> Path:
+    """設定・パターンファイルの保存先ディレクトリ。
+    EXE実行時は EXE と同じフォルダ、スクリプト実行時はプロジェクトルート。
+    """
+    import sys
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).parent.parent
+
+
+def patterns_file() -> str:
+    """patterns.json の絶対パスを返す。"""
+    return str(_data_dir() / "patterns.json")
+
+
+_settings_path = _data_dir() / "gui_settings.json"
 _data: dict[str, Any] = {}
 
 

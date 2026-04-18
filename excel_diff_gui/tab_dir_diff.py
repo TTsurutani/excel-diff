@@ -140,7 +140,7 @@ class TabDirDiff(tk.Frame):
     def _reload_patterns(self) -> None:
         try:
             from excel_diff.patterns import PatternStore
-            store = PatternStore()
+            store = PatternStore(cfg.patterns_file())
             self._patterns = store.list_all()
         except Exception:
             self._patterns = []
@@ -301,7 +301,7 @@ class TabDirDiff(tk.Frame):
             self._log(f"パターン適用: {pattern_id}")
             from excel_diff.patterns import PatternStore
             from excel_diff.file_pairing import apply_pattern
-            store = PatternStore()
+            store = PatternStore(cfg.patterns_file())
             pat = store.get(pattern_id)
             if pat is None:
                 raise ValueError(f"パターンが見つかりません: {pattern_id}")

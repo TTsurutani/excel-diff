@@ -131,7 +131,7 @@ class TabPatterns(tk.Frame):
             self._tree_list.delete(row)
         try:
             from excel_diff.patterns import PatternStore
-            for p in PatternStore().list_all():
+            for p in PatternStore(cfg.patterns_file()).list_all():
                 self._tree_list.insert("", "end", iid=p.id,
                                        values=(p.id, p.name, p.key_regex, p.created_at))
         except Exception as e:
@@ -147,7 +147,7 @@ class TabPatterns(tk.Frame):
             return
         try:
             from excel_diff.patterns import PatternStore
-            store = PatternStore()
+            store = PatternStore(cfg.patterns_file())
             store._patterns = [p for p in store._patterns if p.id != pat_id]
             store.save()
             self._log(f"パターン削除: {pat_id}")
@@ -632,7 +632,7 @@ class TabPatterns(tk.Frame):
         try:
             from excel_diff.patterns import PatternStore, PatternDef
             from datetime import date
-            store = PatternStore()
+            store = PatternStore(cfg.patterns_file())
             if store.get(pat_id):
                 if not messagebox.askyesno("確認", f"パターン「{pat_id}」は既に存在します。上書きしますか？"):
                     return
