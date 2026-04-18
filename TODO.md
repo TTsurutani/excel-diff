@@ -77,6 +77,43 @@ for key in all_keys:
 
 ---
 
+---
+
+### [TODO-003] split_workbook の高速化（zipfile 参照追跡方式）
+
+**概要**  
+現在の `splitter.py` は openpyxl で xlsx をシート数分フルロード＆保存するため、  
+123シートで約6分かかる。zipfile を直接操作する方式で 50倍以上の高速化が見込まれる。
+
+**失敗した試みと原因**  
+1. **ET.tostring() 方式**: `xml.etree.ElementTree` で workbook.xml を書き換えると  
+   名前空間プレフィックスが変わり（例: `r:id` → `ns0:id`）、Excel が読めなくなる。  
+2. **正規表現バイト操作方式**: `workbook.xml` / `workbook.xml.rels` / `[Content_Types].xml` を  
+   バイト列の正規表現で書き換えても、以下の孤立ファイルが ZIP 内に残存し Excel が破損と判定する。  
+   - `xl/calcChain.xml` — 全シートのセル計算順序を参照
+   - `xl/worksheets/_rels/sheetN.xml.rels` — 他シートの外部参照
+   - `xl/printerSettings/printerSettingsN.bin` — 各シートのプリンター設定
+   - `xl/drawings/*.vml`, `xl/comments*.xml` — 他シートの描画・コメント
+
+**正しい実装方針（未実装）**  
+「対象シートから到達できるファイルのみを ZIP に含める」ホワイトリスト方式が必要。
+
+```
+手順:
+1. workbook.xml を解析して対象シートの rId → sheetN.xml を特定
+2. xl/worksheets/_rels/sheetN.xml.rels を解析し参照ファイルを収集
+3. [Content_Types].xml のエントリも収集ファイルだけ残す
+4. calcChain.xml は常に除外（参照が全シートにまたがるため再生成不可）
+5. 上記ファイルのみを新 ZIP に書き込む
+6. workbook.xml / workbook.xml.rels / [Content_Types].xml はバイト操作で修正
+   （ET.tostring() は使わず、raw bytes の正規表現のみ使用）
+```
+
+**工数見込み**: 中（splitter.py に 100〜150行の追加実装）  
+**期待効果**: 123シートで 6分 → 数秒（57倍以上）
+
+---
+
 ## 優先度: 低（将来の拡張候補）
 
 - 列レベルのLCS diff（列挿入・削除への対応）

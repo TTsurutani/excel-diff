@@ -1,0 +1,86 @@
+"""gui_settings.json の読み書き。"""
+import json
+from pathlib import Path
+from typing import Any
+
+
+_DEFAULT: dict[str, Any] = {
+    "file_diff": {
+        "old_file": "",
+        "new_file": "",
+        "output": "",
+        "sheet": "",
+        "include_cols": "",
+        "matchers": "",
+        "strikethrough": False,
+        "open_browser": True,
+        "diff_mode": "lcs",
+        "key_cols": "",
+    },
+    "dir_diff": {
+        "old_dir": "",
+        "new_dir": "",
+        "pairing": "exact",
+        "pairs_file": "",
+        "pattern_id": "",
+        "output_dir": "",
+        "sheet": "",
+        "include_cols": "",
+        "matchers": "",
+        "strikethrough": False,
+        "open_browser": True,
+        "diff_mode": "lcs",
+        "key_cols": "",
+    },
+    "split": {
+        "book_file": "",
+        "prefix": "",
+        "suffix": "",
+        "name_regex": "",
+        "output_dir": "",
+    },
+}
+
+_settings_path = Path(__file__).parent.parent / "gui_settings.json"
+_data: dict[str, Any] = {}
+
+
+def _ensure_loaded() -> None:
+    global _data
+    if _data:
+        return
+    import copy
+    _data = copy.deepcopy(_DEFAULT)
+    if _settings_path.exists():
+        try:
+            loaded = json.loads(_settings_path.read_text(encoding="utf-8"))
+            for tab, vals in loaded.items():
+                if tab in _data and isinstance(vals, dict):
+                    _data[tab].update(vals)
+        except Exception:
+            pass
+
+
+def get(tab: str, key: str, default: Any = None) -> Any:
+    _ensure_loaded()
+    return _data.get(tab, {}).get(key, default)
+
+
+def set_tab(tab: str, values: dict[str, Any]) -> None:
+    _ensure_loaded()
+    _data[tab] = values
+
+
+def save() -> None:
+    _ensure_loaded()
+    try:
+        _settings_path.write_text(
+            json.dumps(_data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception:
+        pass
+
+
+def data(tab: str) -> dict[str, Any]:
+    _ensure_loaded()
+    return _data.get(tab, {})
