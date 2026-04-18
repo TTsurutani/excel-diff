@@ -90,6 +90,11 @@ def split_workbook(
             if name != sheet_name:
                 del wb[name]
 
+        # 最後のシートが隠し状態でないことを保証（openpyxl仕様）
+        ws = wb[sheet_name]
+        if ws.sheet_state == 'hidden':
+            ws.sheet_state = 'visible'
+
         # 名前定義を全削除（他シート参照による #REF! エラー防止）
         for dn in list(wb.defined_names):
             del wb.defined_names[dn]
