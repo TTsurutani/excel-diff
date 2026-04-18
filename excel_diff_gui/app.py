@@ -9,8 +9,14 @@ from .tab_patterns import TabPatterns
 from .tab_split import TabSplit
 from .widgets import LogArea
 
+try:
+    from tkinterdnd2 import TkinterDnD
+    _AppBase = TkinterDnD.Tk
+except Exception:
+    _AppBase = tk.Tk
 
-class App(tk.Tk):
+
+class App(_AppBase):
 
     def __init__(self) -> None:
         super().__init__()

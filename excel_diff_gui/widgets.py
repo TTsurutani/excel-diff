@@ -5,8 +5,22 @@ from datetime import datetime
 from typing import Optional
 
 
+def _parse_dnd_path(data: str) -> str:
+    """DnD イベントの data から最初のパスを取り出す。
+    Windows では空白を含むパスが {} で囲まれる。
+    """
+    data = data.strip()
+    if data.startswith("{"):
+        end = data.find("}")
+        if end > 0:
+            return data[1:end]
+    return data.split()[0] if data else ""
+
+
 class FileSelectRow(tk.Frame):
-    """Label + Entry + 参照ボタンの1行。pack() で使う。"""
+    """Label + Entry + 参照ボタンの1行。pack() で使う。
+    tkinterdnd2 が利用可能なとき Entry へのファイルドロップも受け付ける。
+    """
 
     def __init__(
         self,
@@ -22,8 +36,33 @@ class FileSelectRow(tk.Frame):
         self._filetypes = filetypes or [("All files", "*.*")]
 
         tk.Label(self, text=label, width=14, anchor="w").pack(side="left")
-        tk.Entry(self, textvariable=var).pack(side="left", fill="x", expand=True, padx=(0, 4))
+        self._entry = tk.Entry(self, textvariable=var)
+        self._entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
         tk.Button(self, text="参照", width=6, command=self._browse).pack(side="left")
+
+        self._setup_dnd(self._entry)
+
+    def _setup_dnd(self, entry: tk.Entry) -> None:
+        try:
+            from tkinterdnd2 import DND_FILES
+            entry.drop_target_register(DND_FILES)
+            entry.dnd_bind("<<DragEnter>>", self._on_drag_enter)
+            entry.dnd_bind("<<DragLeave>>", self._on_drag_leave)
+            entry.dnd_bind("<<Drop>>",      self._on_drop)
+        except Exception:
+            pass
+
+    def _on_drag_enter(self, event) -> None:
+        event.widget.configure(background="#cce5ff")
+
+    def _on_drag_leave(self, event) -> None:
+        event.widget.configure(background="white")
+
+    def _on_drop(self, event) -> None:
+        event.widget.configure(background="white")
+        path = _parse_dnd_path(event.data)
+        if path:
+            self._var.set(path)
 
     def _browse(self) -> None:
         if self._mode == "dir":

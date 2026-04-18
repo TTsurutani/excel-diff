@@ -22,6 +22,7 @@ pyinstaller ^
     --onefile ^
     --noconsole ^
     --name excel-diff-gui ^
+    --collect-all tkinterdnd2 ^
     --clean ^
     excel_diff_gui\__main__.py
 
