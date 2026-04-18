@@ -109,12 +109,30 @@ excel-diff.exe --list-patterns [--patterns-file FILE]
 ### 4-6. ブックのシート分解
 
 ```
-excel-diff.exe --split <ブック.xlsx> [--prefix TEXT] [--suffix TEXT] [--output-dir DIR]
+excel-diff.exe --split <ブック.xlsx> [--prefix TEXT] [--suffix TEXT] [--name-regex PATTERN] [--output-dir DIR]
 ```
 
 1つのブックを「1シート = 1ファイル」に分解する。
-出力ファイル名は `<prefix><シート名><suffix>.xlsx`。
+出力ファイル名は `<prefix><ファイル名ベース><suffix>.xlsx`。
 シート名にファイル名不正文字（`\ / : * ? " < > |`）が含まれる場合は `_` に置換する。
+
+**`--name-regex` によるファイル名ベース抽出**
+
+正規表現の第1キャプチャグループにマッチした文字列をファイル名ベースとして使用する。
+
+| ケース | 動作 |
+|---|---|
+| マッチあり | キャプチャグループ1の値をファイル名ベースとして使用 |
+| マッチなし | シート名全体にフォールバックし、`warnings.warn` で警告を出力 |
+| キャプチャグループなし | `ValueError` を送出してエラー終了 |
+
+例: シート名 `売上（Sales）` に `--name-regex "^([^（]+)"` を適用 → `売上.xlsx`
+
+**名前定義（defined names）の自動クリーンアップ**
+
+分割ループ内で `wb.defined_names` に登録されている全名前定義をメモリ上から削除してから保存する。  
+これにより削除されたシートへの参照（`#REF!`）や Excel 警告を防ぐ。  
+オプション指定不要・`--split` 実行時は常時適用。
 
 ### 4-7. オプション一覧
 
@@ -154,6 +172,7 @@ excel-diff.exe --split <ブック.xlsx> [--prefix TEXT] [--suffix TEXT] [--outpu
 | `--split FILE` | 分解するブックのパス | — |
 | `--prefix TEXT` | 出力ファイル名の前置文字列 | なし |
 | `--suffix TEXT` | 出力ファイル名の後置文字列（拡張子の前） | なし |
+| `--name-regex PATTERN` | シート名からファイル名ベースを抽出する正規表現（第1キャプチャグループを使用）。例: `"^([^（]+)"` で和名のみ抽出 | なし（シート名をそのまま使用） |
 | `--output-dir DIR` | 出力先フォルダ | ブックと同フォルダ |
 
 ---

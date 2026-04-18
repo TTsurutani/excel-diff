@@ -104,6 +104,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="--split: 出力ファイル名の前置文字列")
     p.add_argument("--suffix", metavar="TEXT", default="",
                    help="--split: 出力ファイル名の後置文字列（拡張子の前）")
+    p.add_argument("--name-regex", metavar="PATTERN", default=None,
+                   help="--split: シート名からファイル名ベースを抽出する正規表現（第1キャプチャグループを使用）。例: \"^([^（]+)\" で和名のみ抽出")
 
     # --- パターン指定（フォルダ比較時） ---
     p.add_argument("--pairs", metavar="FILE",
@@ -502,6 +504,7 @@ def _run_split(args: argparse.Namespace) -> None:
 
     prefix = args.prefix
     suffix = args.suffix
+    name_regex = args.name_regex
     output_dir = args.output_dir  # None の場合はブックと同フォルダ
 
     print(f"分解中: {path}")
@@ -509,8 +512,16 @@ def _run_split(args: argparse.Namespace) -> None:
         print(f"  前置: {prefix}")
     if suffix:
         print(f"  後置: {suffix}")
+    if name_regex:
+        print(f"  名前変換正規表現: {name_regex}")
 
-    output_paths = split_workbook(path, prefix=prefix, suffix=suffix, output_dir=output_dir)
+    try:
+        output_paths = split_workbook(
+            path, prefix=prefix, suffix=suffix, name_regex=name_regex, output_dir=output_dir
+        )
+    except ValueError as e:
+        print(f"エラー: {e}", file=sys.stderr)
+        sys.exit(1)
 
     print()
     print(f"{len(output_paths)} シートを分解しました:")

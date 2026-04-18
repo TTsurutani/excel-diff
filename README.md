@@ -201,6 +201,7 @@ python -m excel_diff old.xlsx new.xlsx --key-cols B,C
 | `--split FILE` | ブックをシート単位のファイルに分解する |
 | `--prefix TEXT` | 出力ファイル名の前置文字列 |
 | `--suffix TEXT` | 出力ファイル名の後置文字列（拡張子の前） |
+| `--name-regex PATTERN` | シート名からファイル名ベースを抽出する正規表現（第1キャプチャグループを使用） |
 | `--output-dir DIR` | 出力先フォルダ（省略時はブックと同じフォルダ） |
 
 ---
@@ -317,6 +318,26 @@ python -m excel_diff --split book.xlsx --suffix "_確定"
 :: 前置・後置と出力先フォルダを指定
 python -m excel_diff --split book.xlsx --prefix "2024_" --suffix "_v2" --output-dir out/
 ```
+
+### ファイル名の柔軟な指定（`--name-regex`）
+
+シート名が「和名（英名）」のような形式の場合、正規表現のキャプチャグループでファイル名ベースを抽出できる。
+
+```bat
+:: 「売上（Sales）」→「売上.xlsx」（括弧の前までを抽出）
+python -m excel_diff --split book.xlsx --name-regex "^([^（]+)"
+
+:: 「01_概要」→「概要.xlsx」（番号プレフィックスを除去）
+python -m excel_diff --split book.xlsx --name-regex "^\d+_(.+)"
+```
+
+- 正規表現には **第1キャプチャグループ `(...)`** を1つ以上含める必要がある
+- マッチしないシートはシート名全体にフォールバックして警告を出力する
+- `--prefix` / `--suffix` と併用可能
+
+> **名前定義（defined names）の自動クリーンアップ**  
+> 分割時にブックが持つ名前定義を全件削除してから保存する。  
+> これにより他シート参照による `#REF!` エラーを防ぐ。オプション指定不要・常時適用。
 
 ---
 
