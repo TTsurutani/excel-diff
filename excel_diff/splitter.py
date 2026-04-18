@@ -7,11 +7,17 @@ split_workbook(path, prefix, suffix, name_regex, output_dir) → list[str]
 
 実装方針:
   xlsx は ZIP 形式のため、zipfile モジュールで直接操作する。
-  openpyxl で毎回フルロードする旧方式に比べ、ファイル全体を1回だけメモリに
-  読み込んでから各シートを出力するため大幅に高速（実測 60倍以上）。
-  対象シート以外のシートXMLを除外し、workbook.xml / workbook.xml.rels /
-  [Content_Types].xml を最小限書き換えてから新しい ZIP として保存する。
-  名前定義（defined names）は xl/workbook.xml から一括削除（#REF! 防止）。
+  openpyxl で毎回フルロードする旧方式と異なり、ファイル全体を1回だけメモリに
+  読み込んでから各シートを出力するため大幅に高速（実測 50倍以上）。
+
+  XML の書き換えは ET.tostring() による再シリアライズを避け、正規表現による
+  バイト列の直接編集で行う。これにより名前空間宣言が壊れる問題を防ぐ。
+  （ET.tostring() は名前空間プレフィックスを変更するため Excel が読めなくなる）
+
+  修正対象ファイル（3点のみ）:
+    xl/workbook.xml        ← 対象シートのみ残す・hidden 解除・definedNames 削除
+    xl/_rels/workbook.xml.rels ← 対象シートの Relationship のみ残す
+    [Content_Types].xml    ← 対象シートの Override のみ残す
 """
 from __future__ import annotations
 
@@ -22,12 +28,12 @@ import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-# xlsx 内で使用する名前空間
-_WB_NS   = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
-_REL_NS  = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-
 # ファイル名として使えない文字（Windows / macOS / Linux 共通の危険文字）
 _INVALID_CHARS = re.compile(r'[\\/:*?"<>|]')
+
+# xlsx 内で使用する名前空間（メタ情報取得用）
+_WB_NS  = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+_REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 
 
 def _safe_filename(sheet_name: str) -> str:
@@ -50,12 +56,79 @@ def _apply_name_regex(sheet_name: str, pattern: re.Pattern[str]) -> str:
     return sheet_name
 
 
-def _remove_defined_names(wb_root: ET.Element) -> None:
-    """workbook.xml の definedNames 要素を全削除（#REF! エラー防止）。"""
-    dn_elem = wb_root.find(f'{{{_WB_NS}}}definedNames')
-    if dn_elem is not None:
-        wb_root.remove(dn_elem)
+# ── XML バイト列の直接編集（名前空間を壊さないための正規表現方式） ──────────
 
+def _patch_workbook_xml(data: bytes, target_rid: str) -> bytes:
+    """
+    workbook.xml から対象シート以外の <sheet> 要素を削除し、
+    対象シートの state 属性（hidden）を除去し、<definedNames> を全削除する。
+    r:id 属性で判定するためシート名のXMLエスケープを気にしなくてよい。
+    """
+    text = data.decode('utf-8')
+
+    def _replace_sheet(m: re.Match) -> str:
+        elem = m.group(0)
+        rid_m = re.search(r':id="([^"]*)"', elem)
+        if not rid_m:
+            return elem
+        if rid_m.group(1) != target_rid:
+            return ''                              # 他シートは削除
+        # state="hidden" 等を除去（unhide）
+        return re.sub(r'\s+state="[^"]*"', '', elem)
+
+    # <sheet ... /> 要素を処理
+    text = re.sub(r'<sheet\b[^>]*/>', _replace_sheet, text)
+    # <definedNames> ブロックを全削除（#REF! 防止）
+    text = re.sub(r'<definedNames\b[^>]*>.*?</definedNames>', '', text, flags=re.DOTALL)
+    text = re.sub(r'<definedNames\s*/>', '', text)
+
+    return text.encode('utf-8')
+
+
+def _patch_workbook_rels(data: bytes, target_rid: str) -> bytes:
+    """
+    workbook.xml.rels から、worksheets/ を Target に持つ Relationship のうち
+    対象シート以外のものを削除する。
+    """
+    text = data.decode('utf-8')
+
+    def _replace_rel(m: re.Match) -> str:
+        elem = m.group(0)
+        id_m  = re.search(r'\bId="([^"]*)"',     elem)
+        tgt_m = re.search(r'\bTarget="([^"]*)"', elem)
+        if not id_m or not tgt_m:
+            return elem
+        if tgt_m.group(1).startswith('worksheets/') and id_m.group(1) != target_rid:
+            return ''  # 他シートの Relationship を削除
+        return elem
+
+    text = re.sub(r'<Relationship\b[^>]*/>', _replace_rel, text)
+    return text.encode('utf-8')
+
+
+def _patch_content_types(data: bytes, target_file: str) -> bytes:
+    """
+    [Content_Types].xml から /xl/worksheets/ 以下の Override のうち
+    対象シート以外のものを削除する。
+    """
+    text = data.decode('utf-8')
+    target_part = '/' + target_file   # /xl/worksheets/sheetN.xml
+
+    def _replace_override(m: re.Match) -> str:
+        elem = m.group(0)
+        pn_m = re.search(r'\bPartName="([^"]*)"', elem)
+        if not pn_m:
+            return elem
+        pn = pn_m.group(1)
+        if pn.startswith('/xl/worksheets/') and pn != target_part:
+            return ''  # 他シートの Override を削除
+        return elem
+
+    text = re.sub(r'<Override\b[^>]*/>', _replace_override, text)
+    return text.encode('utf-8')
+
+
+# ── メイン処理 ────────────────────────────────────────────────────────────────
 
 def split_workbook(
     path: str,
@@ -98,7 +171,7 @@ def split_workbook(
         for item in zf.infolist():
             file_cache[item.filename] = (item, zf.read(item.filename))
 
-    # workbook.xml からシート情報を取得
+    # workbook.xml からシート情報を取得（ETは読み取りのみに使用）
     wb_data = file_cache['xl/workbook.xml'][1]
     wb_root = ET.fromstring(wb_data)
     sheets_elem = wb_root.find(f'{{{_WB_NS}}}sheets')
@@ -141,36 +214,13 @@ def split_workbook(
                 if fname in other_files:
                     continue
 
+                # 3ファイルのみバイト列を直接編集（再シリアライズしない）
                 if fname == 'xl/workbook.xml':
-                    # 対象シートのみ残し、hidden を解除し、definedNames を削除
-                    root = ET.fromstring(data)
-                    sh_elem = root.find(f'{{{_WB_NS}}}sheets')
-                    if sh_elem is not None:
-                        for s in list(sh_elem):
-                            if s.get('name') != target_name:
-                                sh_elem.remove(s)
-                            else:
-                                s.attrib.pop('state', None)  # 隠し状態を解除
-                    _remove_defined_names(root)
-                    data = ET.tostring(root, encoding='UTF-8', xml_declaration=True)
-
+                    data = _patch_workbook_xml(data, target_rid)
                 elif fname == 'xl/_rels/workbook.xml.rels':
-                    # 対象シートの rel のみ残す
-                    root = ET.fromstring(data)
-                    for r in list(root):
-                        t = r.get('Target', '')
-                        if t.startswith('worksheets/') and f'xl/{t}' != target_file:
-                            root.remove(r)
-                    data = ET.tostring(root, encoding='UTF-8', xml_declaration=True)
-
+                    data = _patch_workbook_rels(data, target_rid)
                 elif fname == '[Content_Types].xml':
-                    # 対象シート以外の Override を削除
-                    root = ET.fromstring(data)
-                    for ov in list(root):
-                        pn = ov.get('PartName', '')
-                        if pn.startswith('/xl/worksheets/') and pn != f'/{target_file}':
-                            root.remove(ov)
-                    data = ET.tostring(root, encoding='UTF-8', xml_declaration=True)
+                    data = _patch_content_types(data, target_file)
 
                 dst.writestr(item, data)
 
