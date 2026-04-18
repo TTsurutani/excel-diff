@@ -4,7 +4,7 @@ import queue
 import re
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import messagebox, simpledialog, ttk
 from typing import Callable
 
 from . import settings as cfg
@@ -40,6 +40,7 @@ class TabSplit(tk.Frame):
         self._suffix = tk.StringVar(value=cfg.get("split", "suffix"))
         self._nregex = tk.StringVar(value=cfg.get("split", "name_regex"))
         self._outdir = tk.StringVar(value=cfg.get("split", "output_dir"))
+        self._presets: list = []
 
         self._build()
 
@@ -82,6 +83,19 @@ class TabSplit(tk.Frame):
         tk.Label(grp,
                  text="  ※ キャプチャグループ () の内容がファイル名ベースになります。空=シート名そのまま",
                  fg="gray", font=("", 8)).pack(anchor="w", padx=6)
+
+        fr_pst = tk.Frame(grp)
+        fr_pst.pack(fill="x", padx=6, pady=2)
+        tk.Label(fr_pst, text="よく使うパターン", width=14, anchor="w").pack(side="left")
+        self._preset_combo = ttk.Combobox(fr_pst, state="readonly", width=30)
+        self._preset_combo.pack(side="left")
+        self._preset_combo.bind("<<ComboboxSelected>>", self._on_preset_selected)
+        tk.Button(fr_pst, text="保存", width=5,
+                  command=self._save_preset).pack(side="left", padx=(4, 2))
+        tk.Button(fr_pst, text="削除", width=5,
+                  command=self._delete_preset).pack(side="left")
+
+        self._load_presets()
 
         FileSelectRow(grp, "出力先フォルダ", self._outdir, mode="dir").pack(
             fill="x", padx=6, pady=2)
@@ -130,6 +144,58 @@ class TabSplit(tk.Frame):
             command=self._run,
         )
         self._btn_run.pack(side="right")
+
+    # ================================================================== プリセット管理
+
+    def _load_presets(self) -> None:
+        self._presets = cfg.get_split_presets()
+        self._preset_combo["values"] = [p["name"] for p in self._presets]
+        self._preset_combo.set("")
+
+    def _on_preset_selected(self, _event=None) -> None:
+        idx = self._preset_combo.current()
+        if 0 <= idx < len(self._presets):
+            self._nregex.set(self._presets[idx]["regex"])
+
+    def _save_preset(self) -> None:
+        regex = self._nregex.get().strip()
+        if not regex:
+            messagebox.showwarning("確認", "正規表現が入力されていません", parent=self)
+            return
+        name = simpledialog.askstring(
+            "パターン保存", "パターン名を入力してください:", parent=self)
+        if not name or not name.strip():
+            return
+        name = name.strip()
+        for p in self._presets:
+            if p["name"] == name:
+                if not messagebox.askyesno(
+                        "上書き確認", f"「{name}」は既に存在します。上書きしますか？", parent=self):
+                    return
+                p["regex"] = regex
+                cfg.set_split_presets(self._presets)
+                cfg.save()
+                self._load_presets()
+                self._preset_combo.set(name)
+                return
+        self._presets.append({"name": name, "regex": regex})
+        cfg.set_split_presets(self._presets)
+        cfg.save()
+        self._load_presets()
+        self._preset_combo.set(name)
+
+    def _delete_preset(self) -> None:
+        idx = self._preset_combo.current()
+        if idx < 0:
+            messagebox.showwarning("確認", "削除するパターンを選択してください", parent=self)
+            return
+        name = self._presets[idx]["name"]
+        if not messagebox.askyesno("削除確認", f"「{name}」を削除しますか？", parent=self):
+            return
+        self._presets.pop(idx)
+        cfg.set_split_presets(self._presets)
+        cfg.save()
+        self._load_presets()
 
     # ================================================================== シート名読み込み
 

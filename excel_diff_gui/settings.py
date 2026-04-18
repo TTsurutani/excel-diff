@@ -39,6 +39,12 @@ _DEFAULT: dict[str, Any] = {
         "name_regex": "",
         "output_dir": "",
     },
+    "split_presets": [
+        {"name": "括弧前の名前（例: 売上（Sales）→売上）", "regex": "^([^（]+)"},
+        {"name": "番号プレフィックス除去（例: 01_概要→概要）", "regex": r"^\d+_(.+)"},
+        {"name": "日付サフィックス除去（例: report_20240101→report）", "regex": r"^(.+?)_\d{8}$"},
+        {"name": "バージョン番号除去（例: 報告書_v2→報告書）", "regex": r"^(.+?)_v\d+$"},
+    ],
 }
 
 def _data_dir() -> Path:
@@ -70,8 +76,11 @@ def _ensure_loaded() -> None:
         try:
             loaded = json.loads(_settings_path.read_text(encoding="utf-8"))
             for tab, vals in loaded.items():
-                if tab in _data and isinstance(vals, dict):
-                    _data[tab].update(vals)
+                if tab in _data:
+                    if isinstance(vals, dict) and isinstance(_data[tab], dict):
+                        _data[tab].update(vals)
+                    else:
+                        _data[tab] = vals
         except Exception:
             pass
 
@@ -99,3 +108,13 @@ def save() -> None:
 def data(tab: str) -> dict[str, Any]:
     _ensure_loaded()
     return _data.get(tab, {})
+
+
+def get_split_presets() -> list:
+    _ensure_loaded()
+    return _data.get("split_presets", [])
+
+
+def set_split_presets(presets: list) -> None:
+    _ensure_loaded()
+    _data["split_presets"] = presets
