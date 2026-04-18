@@ -87,13 +87,13 @@ class TabSplit(tk.Frame):
         fr_pst = tk.Frame(grp)
         fr_pst.pack(fill="x", padx=6, pady=2)
         tk.Label(fr_pst, text="よく使うパターン", width=14, anchor="w").pack(side="left")
-        self._preset_combo = ttk.Combobox(fr_pst, state="readonly", width=30)
-        self._preset_combo.pack(side="left")
-        self._preset_combo.bind("<<ComboboxSelected>>", self._on_preset_selected)
-        tk.Button(fr_pst, text="保存", width=5,
-                  command=self._save_preset).pack(side="left", padx=(4, 2))
         tk.Button(fr_pst, text="削除", width=5,
-                  command=self._delete_preset).pack(side="left")
+                  command=self._delete_preset).pack(side="right")
+        tk.Button(fr_pst, text="保存", width=5,
+                  command=self._save_preset).pack(side="right", padx=(2, 4))
+        self._preset_combo = ttk.Combobox(fr_pst, state="readonly")
+        self._preset_combo.pack(side="left", fill="x", expand=True)
+        self._preset_combo.bind("<<ComboboxSelected>>", self._on_preset_selected)
 
         self._load_presets()
 
