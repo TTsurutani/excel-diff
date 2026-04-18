@@ -15,6 +15,7 @@ dist/
 
 # テストデータ（生成物）
 tests/fixtures/
+tests/index_test/
 
 # Excel の一時ファイル
 ~$*.xlsx
