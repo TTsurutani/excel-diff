@@ -53,6 +53,16 @@ class TabSplit(tk.Frame):
     def _build(self) -> None:
         pad = {"padx": 6, "pady": 3}
 
+        # ── 実行ボタン（expand=True より先に bottom pack してレイアウトを確保）─
+        btn_row = tk.Frame(self)
+        btn_row.pack(side="bottom", fill="x", padx=6, pady=(4, 6))
+        self._btn_run = tk.Button(
+            btn_row, text="実行", width=16,
+            bg="#4a9eff", fg="white", font=("", 10, "bold"),
+            command=self._run,
+        )
+        self._btn_run.pack(side="right")
+
         # ── 入力フォーム ────────────────────────────────────────────────
         grp = tk.LabelFrame(self, text="設定")
         grp.pack(fill="x", **pad)
@@ -64,26 +74,21 @@ class TabSplit(tk.Frame):
         # ファイル選択時にシート名を自動読み込み
         self._book.trace_add("write", lambda *_: self._on_book_change())
 
-        fr_pre = tk.Frame(grp)
-        fr_pre.pack(fill="x", padx=6, pady=2)
-        tk.Label(fr_pre, text="前置文字列", width=14, anchor="w").pack(side="left")
-        tk.Entry(fr_pre, textvariable=self._prefix, width=20).pack(side="left")
-
-        fr_suf = tk.Frame(grp)
-        fr_suf.pack(fill="x", padx=6, pady=2)
-        tk.Label(fr_suf, text="後置文字列", width=14, anchor="w").pack(side="left")
-        tk.Entry(fr_suf, textvariable=self._suffix, width=20).pack(side="left")
+        # 前置・後置を 1 行にまとめて縦スペースを節約
+        fr_presuf = tk.Frame(grp)
+        fr_presuf.pack(fill="x", padx=6, pady=2)
+        tk.Label(fr_presuf, text="前置文字列", width=10, anchor="w").pack(side="left")
+        tk.Entry(fr_presuf, textvariable=self._prefix, width=16).pack(side="left")
+        tk.Label(fr_presuf, text="  後置文字列", anchor="w").pack(side="left")
+        tk.Entry(fr_presuf, textvariable=self._suffix, width=16).pack(side="left")
 
         fr_rex = tk.Frame(grp)
         fr_rex.pack(fill="x", padx=6, pady=2)
         tk.Label(fr_rex, text="名前変換正規表現", width=14, anchor="w").pack(side="left")
         tk.Entry(fr_rex, textvariable=self._nregex, width=28).pack(side="left")
-        tk.Label(fr_rex, text="例: ^([^(（]+)", fg="gray").pack(side="left", padx=6)
-
-        tk.Label(grp,
-                 text="  ※ キャプチャグループ () の内容がファイル名ベースになります。空=シート名そのまま\n"
-                      "  ※ ^([^(（]+) で半角・全角どちらの括弧より前も抽出できます",
-                 fg="gray", font=("", 8)).pack(anchor="w", padx=6)
+        tk.Label(fr_rex,
+                 text="例: ^([^(（]+)  ※() の内容がファイル名になります  空=シート名そのまま",
+                 fg="gray", font=("", 8)).pack(side="left", padx=4)
 
         fr_pst = tk.Frame(grp)
         fr_pst.pack(fill="x", padx=6, pady=2)
@@ -138,16 +143,6 @@ class TabSplit(tk.Frame):
                  text="※ 緑=正規表現一致・変換あり\n※ 橙=正規表現不一致（シート名にフォールバック）\n※ 赤=不正文字を _ に置換",
                  fg="gray", font=("", 8), justify="left").pack(
             side="left", anchor="n", padx=6, pady=4)
-
-        # ── 実行ボタン ──────────────────────────────────────────────────
-        btn_row = tk.Frame(self)
-        btn_row.pack(fill="x", padx=6, pady=(4, 6))
-        self._btn_run = tk.Button(
-            btn_row, text="実行", width=16,
-            bg="#4a9eff", fg="white", font=("", 10, "bold"),
-            command=self._run,
-        )
-        self._btn_run.pack(side="right")
 
     # ================================================================== プリセット管理
 
