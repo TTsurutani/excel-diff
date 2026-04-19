@@ -284,6 +284,18 @@ class TabSplit(tk.Frame):
             self._tree.insert("", "end", values=(sheet, out_name),
                               tags=(tag,) if tag else ())
 
+    # ================================================================== 状態保存
+
+    def save_state(self) -> None:
+        """現在のUI値を設定に書き戻す（ウィンドウを閉じる前に呼ばれる）。"""
+        cfg.set_tab("split", {
+            "book_file":  self._book.get(),
+            "prefix":     self._prefix.get(),
+            "suffix":     self._suffix.get(),
+            "name_regex": self._nregex.get(),
+            "output_dir": self._outdir.get(),
+        })
+
     # ================================================================== 実行
 
     def _run(self) -> None:

@@ -43,10 +43,14 @@ class App(_AppBase):
         self._log_area = LogArea(paned, height=7)
         paned.add(self._log_area, weight=1)
 
+        self._tab_file = TabFileDiff(nb, self._log)
         tab_dir = TabDirDiff(nb, self._log)
-        nb.add(TabFileDiff(nb, self._log), text="ファイル比較")
+        self._tab_dir  = tab_dir
+        self._tab_split = TabSplit(nb, self._log)
+
+        nb.add(self._tab_file, text="ファイル比較")
         nb.add(tab_dir, text="フォルダ比較")
-        nb.add(TabSplit(nb, self._log), text="シート分解")
+        nb.add(self._tab_split, text="シート分解")
         nb.add(
             TabPatterns(
                 nb, self._log,
@@ -62,5 +66,8 @@ class App(_AppBase):
         self._log_area.log(msg)
 
     def _quit(self) -> None:
+        # 各タブの現在UI値を _data に書き戻してから保存
+        for tab in (self._tab_file, self._tab_dir, self._tab_split):
+            tab.save_state()
         cfg.save()
         self.destroy()

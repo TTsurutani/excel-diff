@@ -226,6 +226,10 @@ class TabDirDiff(tk.Frame):
             "key_cols":      self._key_cols.get().strip(),
         }
 
+    def save_state(self) -> None:
+        """現在のUI値を設定に書き戻す（ウィンドウを閉じる前に呼ばれる）。"""
+        cfg.set_tab("dir_diff", self.get_options())
+
     # ------------------------------------------------------------------ 実行
 
     def _run(self) -> None:

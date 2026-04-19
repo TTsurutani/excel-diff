@@ -143,6 +143,23 @@ class TabFileDiff(tk.Frame):
             g, text="完了後ブラウザで開く", variable=self._open_br,
         ).pack(anchor="w", **pad)
 
+    # ------------------------------------------------------------------ 状態保存
+
+    def save_state(self) -> None:
+        """現在のUI値を設定に書き戻す（ウィンドウを閉じる前に呼ばれる）。"""
+        cfg.set_tab("file_diff", {
+            "old_file":      self._old.get(),
+            "new_file":      self._new.get(),
+            "output":        self._out.get(),
+            "sheet":         self._sheet.get(),
+            "include_cols":  self._cols.get(),
+            "matchers":      self._matchers.get(),
+            "strikethrough": self._strike.get(),
+            "open_browser":  self._open_br.get(),
+            "diff_mode":     self._mode.get(),
+            "key_cols":      self._key_cols.get(),
+        })
+
     # ------------------------------------------------------------------ 実行
 
     def _run(self) -> None:
