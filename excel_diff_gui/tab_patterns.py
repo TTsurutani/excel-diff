@@ -609,7 +609,7 @@ class TabPatterns(tk.Frame):
         self._update_preview()
         self._validated_ok = False
         self._btn_save_pat.config(state="disabled")
-        self._lbl_validate.config(text="")
+        self._set_validate_msg("")
         self._show_step3_view()
 
     def _build_step3(self, parent: tk.Frame) -> None:
@@ -668,11 +668,20 @@ class TabPatterns(tk.Frame):
         )
         self._btn_save_pat.pack(side="right")
 
-        # 検証ラベルも side="bottom" で先に pack（折り返し有効）
-        self._lbl_validate = tk.Label(
-            parent, text="", wraplength=700, justify="left", fg="red", font=("", 9),
+        # 検証メッセージエリア（固定高さ3行・スクロール可能）を side="bottom" で先に pack
+        # tk.Label は内容に応じて高さ可変になりプレビューを押しつぶすため tk.Text を使用
+        _vfr = tk.Frame(parent)
+        _vfr.pack(side="bottom", fill="x", padx=8, pady=(2, 0))
+        self._txt_validate = tk.Text(
+            _vfr, height=3, state="disabled", font=("", 9),
+            wrap="word", relief="groove", bd=1,
         )
-        self._lbl_validate.pack(side="bottom", fill="x", anchor="w", padx=8, pady=2)
+        _vsb = ttk.Scrollbar(_vfr, orient="vertical", command=self._txt_validate.yview)
+        self._txt_validate.configure(yscrollcommand=_vsb.set)
+        self._txt_validate.tag_configure("ok",  foreground="#1a7f37")
+        self._txt_validate.tag_configure("err", foreground="red")
+        _vsb.pack(side="right", fill="y")
+        self._txt_validate.pack(side="left", fill="x", expand=True)
 
         # プレビューラベル＋ツリーを最後に pack（expand=True で残りを埋める）
         tk.Label(parent, text="キー抽出プレビュー", font=("", 8, "bold")).pack(
@@ -716,6 +725,15 @@ class TabPatterns(tk.Frame):
         self._entry_regex.config(state=state)
         self._cmb_tpl.config(state="disabled" if self._s3_manual.get() else "readonly")
 
+    def _set_validate_msg(self, text: str, color: str = "red") -> None:
+        """検証メッセージを設定する（_txt_validate へ書き込む）。"""
+        self._txt_validate.config(state="normal")
+        self._txt_validate.delete("1.0", "end")
+        if text:
+            tag = "ok" if color == "#1a7f37" else "err"
+            self._txt_validate.insert("1.0", text, tag)
+        self._txt_validate.config(state="disabled")
+
     def _update_preview(self) -> None:
         for row in self._tree_prev.get_children():
             self._tree_prev.delete(row)
@@ -752,27 +770,27 @@ class TabPatterns(tk.Frame):
     def _validate_pattern(self) -> None:
         regex_str = self._s3_regex.get().strip()
         if not regex_str:
-            self._lbl_validate.config(text="正規表現を入力してください", fg="red")
+            self._set_validate_msg("正規表現を入力してください")
             return
         matched = [p for p in self._pairs if p.old_name and p.new_name]
         if not matched:
-            self._lbl_validate.config(text="検証対象のペアがありません", fg="red")
+            self._set_validate_msg("検証対象のペアがありません")
             return
         try:
             from excel_diff.file_pairing import validate_regex
             errors = validate_regex(matched, regex_str)
         except Exception as e:
-            self._lbl_validate.config(text=f"検証エラー: {e}", fg="red")
+            self._set_validate_msg(f"検証エラー: {e}")
             return
 
         if errors:
             msgs = [f"・{_ERR_MSG.get(e.kind, e.kind)}\n  詳細: {e.details}"
                     for e in errors[:3]]
-            self._lbl_validate.config(text="\n".join(msgs), fg="red")
+            self._set_validate_msg("\n".join(msgs))
             self._validated_ok = False
             self._btn_save_pat.config(state="disabled")
         else:
-            self._lbl_validate.config(text="検証OK。保存できます。", fg="#1a7f37")
+            self._set_validate_msg("検証OK。保存できます。", "#1a7f37")
             self._validated_ok = True
             self._btn_save_pat.config(state="normal")
 
