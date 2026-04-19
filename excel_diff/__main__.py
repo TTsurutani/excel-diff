@@ -183,6 +183,7 @@ def _render_index_html(
     rows_html = ""
     for pair, file_diff, out_path in has_diff:
         delete, insert, modify = _diff_stats(file_diff)
+        total_changes = delete + insert + modify
         rel_path = Path(out_path).name
         rows_html += (
             f'<tr class="has-diff">'
@@ -191,6 +192,7 @@ def _render_index_html(
             f'<td class="num del">{delete}</td>'
             f'<td class="num ins">{insert}</td>'
             f'<td class="num mod">{modify}</td>'
+            f'<td class="num total">{total_changes}</td>'
             f'<td class="link"><a href="{rel_path}" target="_blank">開く</a></td>'
             f'</tr>\n'
         )
@@ -201,6 +203,7 @@ def _render_index_html(
             f'<tr class="no-diff">'
             f'<td class="filename">{pair.old_name}</td>'
             f'<td class="filename">{pair.new_name}</td>'
+            f'<td class="num">−</td>'
             f'<td class="num">−</td>'
             f'<td class="num">−</td>'
             f'<td class="num">−</td>'
@@ -253,6 +256,7 @@ def _render_index_html(
   tr.has-diff td.del {{ color: #cf222e; font-weight: bold; }}
   tr.has-diff td.ins {{ color: #1a7f37; font-weight: bold; }}
   tr.has-diff td.mod {{ color: #9a6700; font-weight: bold; }}
+  tr.has-diff td.total {{ color: #24292f; font-weight: bold; border-left: 1px solid #d0d7de; }}
   tr.no-diff {{ color: #8b949e; }}
   td.link {{ width: 48px; text-align: center; }}
   td.link a {{ color: mediumblue; text-decoration: none; font-weight: bold; }}
@@ -285,6 +289,7 @@ def _render_index_html(
           <th style="text-align:right">削除</th>
           <th style="text-align:right">追加</th>
           <th style="text-align:right">変更</th>
+          <th style="text-align:right">合計</th>
           <th></th>
         </tr>
       </thead>
@@ -722,7 +727,7 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
                 print(f"  [新のみ] {p.new_name}")
 
     # インデックスHTMLを常に生成してブラウザで開く
-    index_path = os.path.join(out_dir, "index.html")
+    index_path = os.path.join(out_dir, "★index.html")
     with open(index_path, "w", encoding="utf-8") as f:
         f.write(_render_index_html(results, unmatched, old_dir, new_dir))
     print(f"\nインデックス → {index_path}")

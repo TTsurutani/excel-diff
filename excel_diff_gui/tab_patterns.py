@@ -458,7 +458,7 @@ class TabPatterns(tk.Frame):
                 # skipped リストは return 後に index に含めないためここでは記録のみ
 
         unmatched = [p for p in self._pairs if not p.old_name or not p.new_name]
-        index_path = os.path.join(out_dir, "index.html")
+        index_path = os.path.join(out_dir, "★index.html")
         Path(index_path).write_text(
             _render_index_html(results, unmatched, old_dir, new_dir), encoding="utf-8")
         return index_path, skipped

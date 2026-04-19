@@ -429,7 +429,7 @@ class TabDirDiff(tk.Frame):
                 skipped.append(pair)
 
         # インデックスHTML生成
-        index_path = os.path.join(out_dir, "index.html")
+        index_path = os.path.join(out_dir, "★index.html")
         Path(index_path).write_text(
             _render_index_html(results, unmatched, old_dir, new_dir),
             encoding="utf-8",
