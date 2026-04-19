@@ -129,31 +129,37 @@ class TabPatterns(tk.Frame):
             variable=self._pairing, value="exact",
         ).pack(anchor="w", padx=8, pady=(4, 0))
 
-        # ペアJSON行
-        fr_pairs = tk.Frame(grp_pairing)
-        fr_pairs.pack(anchor="w", padx=8, pady=(2, 0))
+        # ペアJSON + パターン（同一行に2列並置）
+        fr_2col = tk.Frame(grp_pairing)
+        fr_2col.pack(fill="x", padx=8, pady=(2, 0))
+
+        # 左列: ペアJSON
+        fr_pairs = tk.Frame(fr_2col)
+        fr_pairs.pack(side="left")
         tk.Radiobutton(
             fr_pairs, text="ペアJSON",
             variable=self._pairing, value="pairs",
         ).pack(side="left")
-        tk.Label(fr_pairs, text="ファイル").pack(side="left", padx=(8, 2))
-        self._entry_pairs = tk.Entry(fr_pairs, textvariable=self._pairs_f, width=28)
+        tk.Label(fr_pairs, text="ファイル").pack(side="left", padx=(6, 2))
+        self._entry_pairs = tk.Entry(fr_pairs, textvariable=self._pairs_f, width=22)
         self._entry_pairs.pack(side="left")
         self._btn_pairs = tk.Button(
-            fr_pairs, text="参照", width=6, command=self._browse_pairs,
+            fr_pairs, text="参照", width=5, command=self._browse_pairs,
         )
         self._btn_pairs.pack(side="left", padx=2)
 
-        # パターン行
-        fr_pat = tk.Frame(grp_pairing)
-        fr_pat.pack(anchor="w", padx=8, pady=(2, 0))
+        tk.Label(fr_2col, text="  ").pack(side="left")  # 列間スペーサ
+
+        # 右列: パターン
+        fr_pat = tk.Frame(fr_2col)
+        fr_pat.pack(side="left")
         tk.Radiobutton(
             fr_pat, text="パターン",
             variable=self._pairing, value="pattern",
         ).pack(side="left")
-        tk.Label(fr_pat, text="パターン名").pack(side="left", padx=(8, 2))
+        tk.Label(fr_pat, text="名前").pack(side="left", padx=(6, 2))
         self._cmb_pat = ttk.Combobox(
-            fr_pat, textvariable=self._pat_id, width=24, state="disabled",
+            fr_pat, textvariable=self._pat_id, width=18, state="disabled",
         )
         self._cmb_pat.pack(side="left")
         tk.Button(

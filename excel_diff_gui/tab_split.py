@@ -78,10 +78,11 @@ class TabSplit(tk.Frame):
         fr_rex.pack(fill="x", padx=6, pady=2)
         tk.Label(fr_rex, text="名前変換正規表現", width=14, anchor="w").pack(side="left")
         tk.Entry(fr_rex, textvariable=self._nregex, width=28).pack(side="left")
-        tk.Label(fr_rex, text="例: ^([^（]+)", fg="gray").pack(side="left", padx=6)
+        tk.Label(fr_rex, text="例: ^([^(（]+)", fg="gray").pack(side="left", padx=6)
 
         tk.Label(grp,
-                 text="  ※ キャプチャグループ () の内容がファイル名ベースになります。空=シート名そのまま",
+                 text="  ※ キャプチャグループ () の内容がファイル名ベースになります。空=シート名そのまま\n"
+                      "  ※ ^([^(（]+) で半角・全角どちらの括弧より前も抽出できます",
                  fg="gray", font=("", 8)).pack(anchor="w", padx=6)
 
         fr_pst = tk.Frame(grp)
