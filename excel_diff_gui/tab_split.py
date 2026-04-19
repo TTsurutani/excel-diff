@@ -106,9 +106,11 @@ class TabSplit(tk.Frame):
         for var in (self._prefix, self._suffix, self._nregex):
             var.trace_add("write", lambda *_: self._update_preview())
 
-        # ── 正規表現エラー表示 ──────────────────────────────────────────
+        # ── 正規表現エラー・一致件数表示 ───────────────────────────────
         self._lbl_regex_err = tk.Label(self, text="", fg="red", font=("", 8), anchor="w")
         self._lbl_regex_err.pack(fill="x", padx=6)
+        self._lbl_match_count = tk.Label(self, text="", fg="#1a7f37", font=("", 8), anchor="w")
+        self._lbl_match_count.pack(fill="x", padx=6)
 
         # ── プレビューテーブル ──────────────────────────────────────────
         grp_prev = tk.LabelFrame(self, text="出力プレビュー")
@@ -122,8 +124,9 @@ class TabSplit(tk.Frame):
         self._tree.heading("outfile", text="出力ファイル名")
         self._tree.column("sheet",   width=220, anchor="w")
         self._tree.column("outfile", width=320, anchor="w")
-        self._tree.tag_configure("warn",  foreground="#b58900")   # 警告（フォールバック）
-        self._tree.tag_configure("error", foreground="#cf222e")   # 不正文字置換あり
+        self._tree.tag_configure("matched", foreground="#1a7f37")  # 正規表現一致・変換あり
+        self._tree.tag_configure("warn",    foreground="#b58900") # 正規表現不一致（フォールバック）
+        self._tree.tag_configure("error",   foreground="#cf222e") # 不正文字置換あり
 
         sb = ttk.Scrollbar(grp_prev, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=sb.set)
@@ -131,7 +134,7 @@ class TabSplit(tk.Frame):
         sb.pack(side="left", fill="y", pady=4)
 
         tk.Label(grp_prev,
-                 text="※ 橙=正規表現不一致（シート名にフォールバック）\n※ 赤=ファイル名不正文字を _ に置換",
+                 text="※ 緑=正規表現一致・変換あり\n※ 橙=正規表現不一致（シート名にフォールバック）\n※ 赤=不正文字を _ に置換",
                  fg="gray", font=("", 8), justify="left").pack(
             side="left", anchor="n", padx=6, pady=4)
 
@@ -238,9 +241,13 @@ class TabSplit(tk.Frame):
     # ================================================================== プレビュー更新
 
     def _update_preview(self) -> None:
+        if not hasattr(self, "_tree") or not hasattr(self, "_lbl_regex_err"):
+            return  # まだ初期化中（安全ガード）
+
         for row in self._tree.get_children():
             self._tree.delete(row)
         self._lbl_regex_err.config(text="")
+        self._lbl_match_count.config(text="")
 
         if not self._sheet_names:
             return
@@ -261,28 +268,39 @@ class TabSplit(tk.Frame):
                 self._lbl_regex_err.config(text=f"正規表現エラー: {e}")
                 compiled = None
 
+        matched_count = 0
         for sheet in self._sheet_names:
-            fallback = False
             if compiled:
-                base, matched = _apply_name_regex(sheet, compiled)
-                if not matched:
-                    fallback = True
+                base, regex_matched = _apply_name_regex(sheet, compiled)
+                if regex_matched:
+                    matched_count += 1
+                    # 変換結果がシート名と異なる場合のみ緑で強調
+                    safe_base = _safe_filename(base)
+                    has_invalid = (safe_base != base)
+                    out_name = f"{prefix}{safe_base}{suffix}.xlsx"
+                    tag = "error" if has_invalid else "matched"
+                else:
+                    # 不一致：シート名のままフォールバック（橙）
+                    safe_base = _safe_filename(sheet)
+                    has_invalid = (safe_base != sheet)
+                    out_name = f"{prefix}{safe_base}{suffix}.xlsx"
+                    tag = "error" if has_invalid else "warn"
             else:
                 base = sheet
-
-            safe_base = _safe_filename(base)
-            has_invalid = (safe_base != base)
-            out_name = f"{prefix}{safe_base}{suffix}.xlsx"
-
-            if has_invalid:
-                tag = "error"
-            elif fallback:
-                tag = "warn"
-            else:
-                tag = ""
+                safe_base = _safe_filename(base)
+                has_invalid = (safe_base != base)
+                out_name = f"{prefix}{safe_base}{suffix}.xlsx"
+                tag = "error" if has_invalid else ""
 
             self._tree.insert("", "end", values=(sheet, out_name),
                               tags=(tag,) if tag else ())
+
+        if compiled is not None:
+            total = len(self._sheet_names)
+            self._lbl_match_count.config(
+                text=f"正規表現が一致: {matched_count} / {total} シート"
+                + ("" if matched_count > 0 else "  ← パターンがシート名と一致していません"),
+            )
 
     # ================================================================== 状態保存
 

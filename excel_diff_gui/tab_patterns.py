@@ -231,6 +231,29 @@ class TabPatterns(tk.Frame):
     # ------------------------------------------------------------------ メインビュー
 
     def _build_main_view(self, parent: tk.Frame) -> None:
+        # ボタン行を先に side="bottom" で pack する。
+        # こうしないと grp_pairs の expand=True が縦スペースを全部取り、
+        # ボタンが不可視になる。
+        btn_row = tk.Frame(parent)
+        btn_row.pack(side="bottom", fill="x", padx=8, pady=(4, 8))
+        tk.Button(btn_row, text="JSON保存", command=self._save_pairs_json).pack(side="left")
+        tk.Button(
+            btn_row, text="パターン生成 →", command=self._goto_step3,
+        ).pack(side="left", padx=8)
+        self._btn_compare = tk.Button(
+            btn_row, text="比較実行", width=14,
+            bg="#4a9eff", fg="white", font=("", 10, "bold"),
+            command=self._run_compare_pairs,
+        )
+        self._btn_compare.pack(side="right")
+
+        tk.Label(
+            parent,
+            text="※「旧のみ」「新のみ」の行は比較対象外として扱われます",
+            fg="gray", font=("", 8),
+        ).pack(side="bottom", anchor="w", padx=8)
+
+        # ペアリストは最後に pack（expand=True で残りを埋める）
         grp_pairs = tk.LabelFrame(parent, text="ペアリスト")
         grp_pairs.pack(fill="both", expand=True, padx=4, pady=(4, 2))
 
@@ -248,25 +271,6 @@ class TabPatterns(tk.Frame):
         self._tree_pairs.configure(yscrollcommand=sb2.set)
         self._tree_pairs.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
         sb2.pack(side="left", fill="y", pady=4)
-
-        tk.Label(
-            parent,
-            text="※「旧のみ」「新のみ」の行は比較対象外として扱われます",
-            fg="gray", font=("", 8),
-        ).pack(anchor="w", padx=8)
-
-        btn_row = tk.Frame(parent)
-        btn_row.pack(fill="x", padx=8, pady=(4, 8))
-        tk.Button(btn_row, text="JSON保存", command=self._save_pairs_json).pack(side="left")
-        tk.Button(
-            btn_row, text="パターン生成 →", command=self._goto_step3,
-        ).pack(side="left", padx=8)
-        self._btn_compare = tk.Button(
-            btn_row, text="比較実行", width=14,
-            bg="#4a9eff", fg="white", font=("", 10, "bold"),
-            command=self._run_compare_pairs,
-        )
-        self._btn_compare.pack(side="right")
 
     def _show_main_view(self) -> None:
         self._fr_step3_view.pack_forget()

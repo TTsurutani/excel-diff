@@ -35,6 +35,26 @@ class TabDirDiff(tk.Frame):
     def _build(self) -> None:
         pad = {"padx": 6, "pady": 3}
 
+        # 差分モード（比較オプションより先に表示）
+        grp_mode = tk.LabelFrame(self, text="差分モード")
+        grp_mode.pack(fill="x", **pad)
+
+        tk.Radiobutton(
+            grp_mode, text="LCS（行の出現順で比較・デフォルト）",
+            variable=self._mode, value="lcs", command=self._on_mode,
+        ).pack(anchor="w", padx=8)
+
+        fr_key = tk.Frame(grp_mode)
+        fr_key.pack(anchor="w", padx=8, pady=(0, 4))
+        tk.Radiobutton(
+            fr_key, text="キーJOIN（キー列の値で行を対応付ける）",
+            variable=self._mode, value="key", command=self._on_mode,
+        ).pack(side="left")
+        tk.Label(fr_key, text="キー列").pack(side="left", padx=(12, 2))
+        self._entry_key = tk.Entry(fr_key, textvariable=self._key_cols, width=18)
+        self._entry_key.pack(side="left")
+        tk.Label(fr_key, text="例: C  または  B,C", fg="gray").pack(side="left", padx=6)
+
         # 比較オプション
         grp_opt = tk.LabelFrame(self, text="比較オプション")
         grp_opt.pack(fill="x", **pad)
@@ -66,26 +86,6 @@ class TabDirDiff(tk.Frame):
         tk.Checkbutton(
             grp_opt, text="完了後ブラウザで開く", variable=self._open_br,
         ).pack(anchor="w", padx=6, pady=(2, 6))
-
-        # 差分モード
-        grp_mode = tk.LabelFrame(self, text="差分モード")
-        grp_mode.pack(fill="x", **pad)
-
-        tk.Radiobutton(
-            grp_mode, text="LCS（行の出現順で比較・デフォルト）",
-            variable=self._mode, value="lcs", command=self._on_mode,
-        ).pack(anchor="w", padx=8)
-
-        fr_key = tk.Frame(grp_mode)
-        fr_key.pack(anchor="w", padx=8, pady=(0, 4))
-        tk.Radiobutton(
-            fr_key, text="キーJOIN（キー列の値で行を対応付ける）",
-            variable=self._mode, value="key", command=self._on_mode,
-        ).pack(side="left")
-        tk.Label(fr_key, text="キー列").pack(side="left", padx=(12, 2))
-        self._entry_key = tk.Entry(fr_key, textvariable=self._key_cols, width=18)
-        self._entry_key.pack(side="left")
-        tk.Label(fr_key, text="例: C  または  B,C", fg="gray").pack(side="left", padx=6)
 
         # ナビゲーションボタン
         nav_row = tk.Frame(self)
