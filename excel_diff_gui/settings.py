@@ -18,11 +18,6 @@ _DEFAULT: dict[str, Any] = {
         "key_cols": "",
     },
     "dir_diff": {
-        "old_dir": "",
-        "new_dir": "",
-        "pairing": "exact",
-        "pairs_file": "",
-        "pattern_id": "",
         "output_dir": "",
         "sheet": "",
         "include_cols": "",
@@ -32,6 +27,13 @@ _DEFAULT: dict[str, Any] = {
         "diff_mode": "lcs",
         "key_cols": "",
     },
+    "pair_build": {
+        "old_dir": "",
+        "new_dir": "",
+        "pairing": "exact",
+        "pairs_file": "",
+        "pattern_id": "",
+    },
     "split": {
         "book_file": "",
         "prefix": "",
@@ -40,7 +42,7 @@ _DEFAULT: dict[str, Any] = {
         "output_dir": "",
     },
     "split_presets": [
-        {"name": "括弧前の名前（例: 売上（Sales）→売上）", "regex": "^([^（]+)"},
+        {"name": "括弧前の名前（例: 売上（Sales）→売上）", "regex": "^([^(（]+)"},
         {"name": "番号プレフィックス除去（例: 01_概要→概要）", "regex": r"^\d+_(.+)"},
         {"name": "日付サフィックス除去（例: report_20240101→report）", "regex": r"^(.+?)_\d{8}$"},
         {"name": "バージョン番号除去（例: 報告書_v2→報告書）", "regex": r"^(.+?)_v\d+$"},
@@ -66,6 +68,14 @@ _settings_path = _data_dir() / "gui_settings.json"
 _data: dict[str, Any] = {}
 
 
+def _migrate(data: dict) -> None:
+    """既知の不具合データを自動修正するマイグレーション処理。"""
+    # 旧プリセット: 全角（のみ → 半角・全角両対応に修正
+    for p in data.get("split_presets", []):
+        if p.get("regex") == "^([^（]+)":
+            p["regex"] = "^([^(（]+)"
+
+
 def _ensure_loaded() -> None:
     global _data
     if _data:
@@ -83,6 +93,7 @@ def _ensure_loaded() -> None:
                         _data[tab] = vals
         except Exception:
             pass
+    _migrate(_data)
 
 
 def get(tab: str, key: str, default: Any = None) -> Any:
