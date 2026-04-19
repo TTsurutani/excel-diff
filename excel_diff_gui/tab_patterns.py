@@ -67,10 +67,12 @@ class TabPatterns(tk.Frame):
         self, parent,
         log: Callable[[str], None],
         switch_to_dir_diff: Optional[Callable] = None,
+        get_dir_diff_options: Optional[Callable] = None,
     ) -> None:
         super().__init__(parent)
         self._log = log
         self._switch_to_dir_diff = switch_to_dir_diff
+        self._get_dir_diff_options = get_dir_diff_options
         self._result_q: "queue.Queue | None" = None
         self._pairs: list = []
         self._old_dir = ""
@@ -370,7 +372,11 @@ class TabPatterns(tk.Frame):
         if choice != "ok":
             return
 
-        options = cfg.data("dir_diff")
+        options = (
+            self._get_dir_diff_options()
+            if self._get_dir_diff_options is not None
+            else cfg.data("dir_diff")
+        )
         self._compare_open_browser = options.get("open_browser", True)
         self._log(f"そのまま比較: {len(matched)} 件（フォルダ比較タブの設定を使用）")
         self._result_q = get_worker().submit(

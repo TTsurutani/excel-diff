@@ -204,6 +204,28 @@ class TabDirDiff(tk.Frame):
             g, text="完了後ブラウザで開く", variable=self._open_br,
         ).pack(anchor="w", **pad)
 
+    # ------------------------------------------------------------------ 現在のUI値を返す
+
+    def get_options(self) -> dict:
+        """現在のUI入力値を dict で返す。パターン管理タブの「そのまま比較」から参照する。"""
+        pat_sel = self._pat_id.get().strip()
+        pat_id  = pat_sel.split()[0] if pat_sel else ""
+        return {
+            "old_dir":       self._old.get().strip(),
+            "new_dir":       self._new.get().strip(),
+            "pairing":       self._pairing.get(),
+            "pairs_file":    self._pairs_f.get().strip(),
+            "pattern_id":    pat_id,
+            "output_dir":    self._out_dir.get().strip(),
+            "sheet":         self._sheet.get().strip(),
+            "include_cols":  self._cols.get().strip(),
+            "matchers":      self._matchers.get().strip(),
+            "strikethrough": self._strike.get(),
+            "open_browser":  self._open_br.get(),
+            "diff_mode":     self._mode.get(),
+            "key_cols":      self._key_cols.get().strip(),
+        }
+
     # ------------------------------------------------------------------ 実行
 
     def _run(self) -> None:

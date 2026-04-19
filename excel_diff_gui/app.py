@@ -48,7 +48,11 @@ class App(_AppBase):
         nb.add(tab_dir, text="フォルダ比較")
         nb.add(TabSplit(nb, self._log), text="シート分解")
         nb.add(
-            TabPatterns(nb, self._log, switch_to_dir_diff=lambda: nb.select(tab_dir)),
+            TabPatterns(
+                nb, self._log,
+                switch_to_dir_diff=lambda: nb.select(tab_dir),
+                get_dir_diff_options=tab_dir.get_options,
+            ),
             text="パターン管理",
         )
 
