@@ -652,36 +652,9 @@ class TabPatterns(tk.Frame):
         ).pack(side="left")
         self._s3_regex.trace_add("write", lambda *_: self._update_preview())
 
-        tk.Label(parent, text="キー抽出プレビュー", font=("", 8, "bold")).pack(
-            anchor="w", padx=8, pady=(6, 0))
-
-        cols = ("old", "new", "key", "status")
-        self._tree_prev = ttk.Treeview(
-            parent, columns=cols, show="headings", height=5, selectmode="none",
-        )
-        for col, head, w in zip(cols, ("旧ファイル", "新ファイル", "抽出キー", "状態"),
-                                 (180, 180, 120, 60)):
-            self._tree_prev.heading(col, text=head)
-            self._tree_prev.column(col, width=w, anchor="w")
-        self._tree_prev.tag_configure("ok",        foreground="#1a7f37")
-        self._tree_prev.tag_configure("mismatch",  background="#fff3b0")
-        self._tree_prev.tag_configure("error",     background="#ffe0e0")
-        self._tree_prev.tag_configure("unmatched", foreground="#888888")
-
-        sb3 = ttk.Scrollbar(parent, orient="vertical", command=self._tree_prev.yview)
-        self._tree_prev.configure(yscrollcommand=sb3.set)
-        fr_prev = tk.Frame(parent)
-        fr_prev.pack(fill="both", expand=True, padx=8, pady=(0, 4))
-        self._tree_prev.pack(side="left", fill="both", expand=True)
-        sb3.pack(side="left", fill="y")
-
-        self._lbl_validate = tk.Label(
-            parent, text="", wraplength=500, justify="left", fg="red", font=("", 9),
-        )
-        self._lbl_validate.pack(anchor="w", padx=8, pady=2)
-
+        # ボタン行を side="bottom" で先に pack（expand=True に隠されないよう）
         btn_row = tk.Frame(parent)
-        btn_row.pack(fill="x", padx=8, pady=(4, 8))
+        btn_row.pack(side="bottom", fill="x", padx=8, pady=(4, 8))
         tk.Button(
             btn_row, text="← ペアリストへ戻る", command=self._show_main_view,
         ).pack(side="left")
@@ -694,6 +667,37 @@ class TabPatterns(tk.Frame):
             command=self._save_pattern,
         )
         self._btn_save_pat.pack(side="right")
+
+        # 検証ラベルも side="bottom" で先に pack（折り返し有効）
+        self._lbl_validate = tk.Label(
+            parent, text="", wraplength=700, justify="left", fg="red", font=("", 9),
+        )
+        self._lbl_validate.pack(side="bottom", fill="x", anchor="w", padx=8, pady=2)
+
+        # プレビューラベル＋ツリーを最後に pack（expand=True で残りを埋める）
+        tk.Label(parent, text="キー抽出プレビュー", font=("", 8, "bold")).pack(
+            anchor="w", padx=8, pady=(6, 0))
+
+        fr_prev = tk.Frame(parent)
+        fr_prev.pack(fill="both", expand=True, padx=8, pady=(0, 4))
+
+        cols = ("old", "new", "key", "status")
+        self._tree_prev = ttk.Treeview(
+            fr_prev, columns=cols, show="headings", height=5, selectmode="none",
+        )
+        for col, head, w in zip(cols, ("旧ファイル", "新ファイル", "抽出キー", "状態"),
+                                 (180, 180, 120, 60)):
+            self._tree_prev.heading(col, text=head)
+            self._tree_prev.column(col, width=w, anchor="w")
+        self._tree_prev.tag_configure("ok",        foreground="#1a7f37")
+        self._tree_prev.tag_configure("mismatch",  background="#fff3b0")
+        self._tree_prev.tag_configure("error",     background="#ffe0e0")
+        self._tree_prev.tag_configure("unmatched", foreground="#888888")
+
+        sb3 = ttk.Scrollbar(fr_prev, orient="vertical", command=self._tree_prev.yview)
+        self._tree_prev.configure(yscrollcommand=sb3.set)
+        self._tree_prev.pack(side="left", fill="both", expand=True)
+        sb3.pack(side="left", fill="y")
 
         self._on_manual_toggle()
 
