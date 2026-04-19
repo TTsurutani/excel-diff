@@ -24,7 +24,7 @@ pyinstaller ^
     --name excel-diff-gui ^
     --collect-all tkinterdnd2 ^
     --clean ^
-    excel_diff_gui\__main__.py
+    gui_main.py
 
 echo.
 if exist "dist\excel-diff-gui.exe" (
