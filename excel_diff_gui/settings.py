@@ -18,11 +18,6 @@ _DEFAULT: dict[str, Any] = {
         "key_cols": "",
     },
     "dir_diff": {
-        "old_dir": "",
-        "new_dir": "",
-        "pairing": "exact",
-        "pairs_file": "",
-        "pattern_id": "",
         "output_dir": "",
         "sheet": "",
         "include_cols": "",
@@ -31,6 +26,13 @@ _DEFAULT: dict[str, Any] = {
         "open_browser": True,
         "diff_mode": "lcs",
         "key_cols": "",
+    },
+    "pair_build": {
+        "old_dir": "",
+        "new_dir": "",
+        "pairing": "exact",
+        "pairs_file": "",
+        "pattern_id": "",
     },
     "split": {
         "book_file": "",

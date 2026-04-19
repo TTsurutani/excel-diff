@@ -33,6 +33,7 @@ class TabFileDiff(tk.Frame):
 
         self._opt_built = False
         self._opt_open  = False
+        self._btn_frame: "tk.Frame | None" = None
 
         self._build()
 
@@ -73,23 +74,29 @@ class TabFileDiff(tk.Frame):
         self._entry_key.pack(side="left")
         tk.Label(fr_key, text="例: C  または  B,C", fg="gray").pack(side="left", padx=6)
 
-        # オプション折りたたみ + 実行ボタン（同じ行）
+        # オプション折りたたみラベル
         ctrl_row = tk.Frame(self)
         ctrl_row.pack(fill="x", padx=6, pady=(6, 2))
-
-        self._lbl_opt = tk.Label(ctrl_row, text="▶ オプション", cursor="hand2", fg="blue")
+        self._lbl_opt = tk.Label(ctrl_row, text="▼ オプション", cursor="hand2", fg="blue")
         self._lbl_opt.pack(side="left")
         self._lbl_opt.bind("<Button-1>", self._toggle_opt)
 
+        # 実行ボタン（オプションの下に常に配置）
+        self._btn_frame = tk.Frame(self)
+        self._btn_frame.pack(fill="x", padx=6, pady=(2, 6))
         self._btn_run = tk.Button(
-            ctrl_row, text="実行", width=16,
+            self._btn_frame, text="実行", width=16,
             bg="#4a9eff", fg="white", font=("", 10, "bold"),
             command=self._run,
         )
         self._btn_run.pack(side="right")
 
-        # オプション本体（初期は非表示）
+        # オプション本体（初期から展開して btn_frame の前に挿入）
         self._grp_opt = tk.LabelFrame(self, text="オプション")
+        self._build_opt()
+        self._opt_built = True
+        self._grp_opt.pack(fill="x", padx=6, pady=3, before=self._btn_frame)
+        self._opt_open = True
 
         self._on_mode()
 
@@ -106,7 +113,8 @@ class TabFileDiff(tk.Frame):
             if not self._opt_built:
                 self._build_opt()
                 self._opt_built = True
-            self._grp_opt.pack(fill="x", padx=6, pady=3)
+            # 実行ボタンフレームの直前に挿入
+            self._grp_opt.pack(fill="x", padx=6, pady=3, before=self._btn_frame)
             self._opt_open = True
             self._lbl_opt.config(text="▼ オプション")
 

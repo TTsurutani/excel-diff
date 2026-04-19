@@ -1,4 +1,4 @@
-"""タブ④ パターン管理。"""
+"""タブ② フォルダ比較（ペアリング・比較実行）。"""
 import os
 import queue
 import re
@@ -64,32 +64,146 @@ def _classify_var(v: str) -> str:
 class TabPatterns(tk.Frame):
 
     def __init__(
-        self, parent,
+        self,
+        parent,
         log: Callable[[str], None],
+        get_compare_options: Optional[Callable] = None,
+        # 旧引数との後方互換（無視）
         switch_to_dir_diff: Optional[Callable] = None,
         get_dir_diff_options: Optional[Callable] = None,
     ) -> None:
         super().__init__(parent)
         self._log = log
-        self._switch_to_dir_diff = switch_to_dir_diff
-        self._get_dir_diff_options = get_dir_diff_options
+        self._get_compare_options = get_compare_options or get_dir_diff_options
         self._result_q: "queue.Queue | None" = None
         self._pairs: list = []
-        self._old_dir = ""
-        self._new_dir = ""
         self._validated_ok = False
         self._compare_open_browser = True
+        self._rebuild_after_id = None
+        self._patterns: list = []
+
+        # フォルダ選択
+        self._old_dir = tk.StringVar(value=cfg.get("pair_build", "old_dir"))
+        self._new_dir = tk.StringVar(value=cfg.get("pair_build", "new_dir"))
+
+        # ペアリング方法
+        self._pairing = tk.StringVar(value=cfg.get("pair_build", "pairing", "exact"))
+        self._pairs_f = tk.StringVar(value=cfg.get("pair_build", "pairs_file"))
+        self._pat_id  = tk.StringVar(value=cfg.get("pair_build", "pattern_id"))
 
         self._build()
+
+        # 変更トレース（ウィザード以外は自動でペアリスト再構築）
+        self._old_dir.trace_add("write", lambda *_: self._schedule_rebuild())
+        self._new_dir.trace_add("write", lambda *_: self._schedule_rebuild())
+        self._pairing.trace_add("write", lambda *_: self._on_pairing_change())
+        self._pairs_f.trace_add("write", lambda *_: self._schedule_rebuild())
+        self._pat_id.trace_add("write",  lambda *_: self._schedule_rebuild())
+
+        # 初期化
+        self._reload_patterns()
+        self._on_pairing_change()
+        self._rebuild_pairs_now()
+        self._refresh_list()
 
     # ================================================================== レイアウト
 
     def _build(self) -> None:
-        # 上段（パターン一覧）と下段（ウィザード）を縦分割ペインで配置
+        pad = {"padx": 6, "pady": 3}
+
+        # ── フォルダ選択 ───────────────────────────────────────────────
+        grp_folders = tk.LabelFrame(self, text="フォルダ")
+        grp_folders.pack(fill="x", **pad)
+        FileSelectRow(grp_folders, "旧フォルダ", self._old_dir, mode="dir").pack(
+            fill="x", padx=6, pady=2)
+        FileSelectRow(grp_folders, "新フォルダ", self._new_dir, mode="dir").pack(
+            fill="x", padx=6, pady=2)
+
+        # ── ペアリング方法 ─────────────────────────────────────────────
+        grp_pairing = tk.LabelFrame(self, text="ペアリング方法")
+        grp_pairing.pack(fill="x", **pad)
+
+        tk.Radiobutton(
+            grp_pairing,
+            text="完全一致（同名ファイルを対応付ける・デフォルト）",
+            variable=self._pairing, value="exact",
+        ).pack(anchor="w", padx=8, pady=(4, 0))
+
+        # ペアJSON行
+        fr_pairs = tk.Frame(grp_pairing)
+        fr_pairs.pack(anchor="w", padx=8, pady=(2, 0))
+        tk.Radiobutton(
+            fr_pairs, text="ペアJSON",
+            variable=self._pairing, value="pairs",
+        ).pack(side="left")
+        tk.Label(fr_pairs, text="ファイル").pack(side="left", padx=(8, 2))
+        self._entry_pairs = tk.Entry(fr_pairs, textvariable=self._pairs_f, width=28)
+        self._entry_pairs.pack(side="left")
+        self._btn_pairs = tk.Button(
+            fr_pairs, text="参照", width=6, command=self._browse_pairs,
+        )
+        self._btn_pairs.pack(side="left", padx=2)
+
+        # パターン行
+        fr_pat = tk.Frame(grp_pairing)
+        fr_pat.pack(anchor="w", padx=8, pady=(2, 0))
+        tk.Radiobutton(
+            fr_pat, text="パターン",
+            variable=self._pairing, value="pattern",
+        ).pack(side="left")
+        tk.Label(fr_pat, text="パターン名").pack(side="left", padx=(8, 2))
+        self._cmb_pat = ttk.Combobox(
+            fr_pat, textvariable=self._pat_id, width=24, state="disabled",
+        )
+        self._cmb_pat.pack(side="left")
+        tk.Button(
+            fr_pat, text="更新", width=5, command=self._reload_patterns,
+        ).pack(side="left", padx=2)
+
+        # ウィザード行（ラジオ）
+        fr_wiz_radio = tk.Frame(grp_pairing)
+        fr_wiz_radio.pack(anchor="w", padx=8, pady=(2, 0))
+        tk.Radiobutton(
+            fr_wiz_radio, text="ウィザード（ファイル名の類似度で自動探索）",
+            variable=self._pairing, value="wizard",
+        ).pack(side="left")
+
+        # ウィザード行（しきい値 + 探索実行）
+        fr_wiz_ctrl = tk.Frame(grp_pairing)
+        fr_wiz_ctrl.pack(fill="x", padx=24, pady=(2, 4))
+        tk.Label(fr_wiz_ctrl, text="しきい値", width=8, anchor="w").pack(side="left")
+        self._s1_thr = tk.DoubleVar(value=0.30)
+        self._s1_thr_lbl = tk.Label(fr_wiz_ctrl, text="0.30", width=5)
+        self._s1_thr_lbl.pack(side="right")
+        tk.Label(fr_wiz_ctrl, text="1.0", fg="gray").pack(side="right")
+        tk.Scale(
+            fr_wiz_ctrl, variable=self._s1_thr, from_=0.0, to=1.0,
+            resolution=0.05, orient="horizontal", showvalue=False,
+            command=lambda v: self._s1_thr_lbl.config(text=f"{float(v):.2f}"),
+        ).pack(side="left", fill="x", expand=True)
+        tk.Label(fr_wiz_ctrl, text="0.0", fg="gray").pack(side="left")
+        self._btn_discover = tk.Button(
+            fr_wiz_ctrl, text="探索実行", width=10,
+            bg="#4a9eff", fg="white", font=("", 9, "bold"),
+            command=self._run_discover,
+        )
+        self._btn_discover.pack(side="right", padx=(8, 0))
+
+        # ── PanedWindow: 上段＝ペアリスト/ウィザード、下段＝パターン一覧 ─
         paned = ttk.PanedWindow(self, orient="vertical")
         paned.pack(fill="both", expand=True, padx=4, pady=4)
 
-        # ── 上段: パターン一覧 ──────────────────────────────────────────
+        # 上段: 切り替えフレーム（ペアリスト ↔ パターン生成ウィザード）
+        self._fr_switchable = tk.Frame(paned)
+        paned.add(self._fr_switchable, weight=2)
+
+        self._fr_main_view = tk.Frame(self._fr_switchable)
+        self._build_main_view(self._fr_main_view)
+
+        self._fr_step3_view = tk.Frame(self._fr_switchable)
+        self._build_step3(self._fr_step3_view)
+
+        # 下段: 保存済みパターン一覧
         grp_list = tk.LabelFrame(paned, text="保存済みパターン一覧")
         paned.add(grp_list, weight=1)
 
@@ -111,91 +225,190 @@ class TabPatterns(tk.Frame):
         tk.Button(btn_fr, text="削除", width=8, command=self._delete_pattern).pack(pady=2)
         tk.Button(btn_fr, text="更新", width=8, command=self._refresh_list).pack(pady=2)
 
-        # ── 下段: ウィザード ────────────────────────────────────────────
-        self._wiz_outer = tk.LabelFrame(paned, text="新規パターン作成ウィザード")
-        paned.add(self._wiz_outer, weight=2)
+        # 初期表示
+        self._show_main_view()
 
-        self._fr_step1 = tk.Frame(self._wiz_outer)
-        self._fr_step2 = tk.Frame(self._wiz_outer)
-        self._fr_step3 = tk.Frame(self._wiz_outer)
+    # ------------------------------------------------------------------ メインビュー
 
-        self._build_step1(self._fr_step1)
-        self._build_step2(self._fr_step2)
-        self._build_step3(self._fr_step3)
+    def _build_main_view(self, parent: tk.Frame) -> None:
+        grp_pairs = tk.LabelFrame(parent, text="ペアリスト")
+        grp_pairs.pack(fill="both", expand=True, padx=4, pady=(4, 2))
 
-        self._show_step(1)
-        self._refresh_list()
+        cols = ("old", "new", "score", "kind")
+        self._tree_pairs = ttk.Treeview(
+            grp_pairs, columns=cols, show="headings", height=6, selectmode="browse",
+        )
+        for col, head, w in zip(cols, ("旧ファイル", "新ファイル", "スコア", "種別"),
+                                 (190, 190, 60, 80)):
+            self._tree_pairs.heading(col, text=head)
+            self._tree_pairs.column(col, width=w, anchor="w")
+        self._tree_pairs.tag_configure("unmatched", foreground="#888888")
 
-    # ------------------------------------------------------------------ パターン一覧
+        sb2 = ttk.Scrollbar(grp_pairs, orient="vertical", command=self._tree_pairs.yview)
+        self._tree_pairs.configure(yscrollcommand=sb2.set)
+        self._tree_pairs.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
+        sb2.pack(side="left", fill="y", pady=4)
 
-    def _refresh_list(self) -> None:
-        for row in self._tree_list.get_children():
-            self._tree_list.delete(row)
-        try:
-            from excel_diff.patterns import PatternStore
-            for p in PatternStore(cfg.patterns_file()).list_all():
-                self._tree_list.insert("", "end", iid=p.id,
-                                       values=(p.id, p.name, p.key_regex, p.created_at))
-        except Exception as e:
-            self._log(f"パターン一覧の読み込みエラー: {e}")
-
-    def _delete_pattern(self) -> None:
-        sel = self._tree_list.selection()
-        if not sel:
-            messagebox.showinfo("情報", "削除するパターンを選択してください")
-            return
-        pat_id = sel[0]
-        if not messagebox.askyesno("確認", f"パターン「{pat_id}」を削除しますか？"):
-            return
-        try:
-            from excel_diff.patterns import PatternStore
-            store = PatternStore(cfg.patterns_file())
-            store._patterns = [p for p in store._patterns if p.id != pat_id]
-            store.save()
-            self._log(f"パターン削除: {pat_id}")
-            self._refresh_list()
-        except Exception as e:
-            self._log(f"削除エラー: {e}")
-
-    # ================================================================== ステップ①
-
-    def _build_step1(self, parent: tk.Frame) -> None:
-        tk.Label(parent, text="ステップ①: ペア候補探索", font=("", 9, "bold")).pack(
-            anchor="w", padx=8, pady=(6, 2))
-
-        self._s1_old = tk.StringVar()
-        self._s1_new = tk.StringVar()
-        FileSelectRow(parent, "旧フォルダ", self._s1_old, mode="dir").pack(
-            fill="x", padx=8, pady=2)
-        FileSelectRow(parent, "新フォルダ", self._s1_new, mode="dir").pack(
-            fill="x", padx=8, pady=2)
-
-        fr_thr = tk.Frame(parent)
-        fr_thr.pack(fill="x", padx=8, pady=4)
-        tk.Label(fr_thr, text="しきい値", width=10, anchor="w").pack(side="left")
-        self._s1_thr = tk.DoubleVar(value=0.30)
-        self._s1_thr_lbl = tk.Label(fr_thr, text="0.30", width=5)
-        self._s1_thr_lbl.pack(side="right")
-        tk.Label(fr_thr, text="1.0", fg="gray").pack(side="right")
-        tk.Scale(
-            fr_thr, variable=self._s1_thr, from_=0.0, to=1.0,
-            resolution=0.05, orient="horizontal", showvalue=False,
-            command=lambda v: self._s1_thr_lbl.config(text=f"{float(v):.2f}"),
-        ).pack(side="left", fill="x", expand=True)
-        tk.Label(fr_thr, text="0.0", fg="gray").pack(side="left")
+        tk.Label(
+            parent,
+            text="※「旧のみ」「新のみ」の行は比較対象外として扱われます",
+            fg="gray", font=("", 8),
+        ).pack(anchor="w", padx=8)
 
         btn_row = tk.Frame(parent)
         btn_row.pack(fill="x", padx=8, pady=(4, 8))
-        self._s1_btn = tk.Button(
-            btn_row, text="探索実行", width=14,
+        tk.Button(btn_row, text="JSON保存", command=self._save_pairs_json).pack(side="left")
+        tk.Button(
+            btn_row, text="パターン生成 →", command=self._goto_step3,
+        ).pack(side="left", padx=8)
+        self._btn_compare = tk.Button(
+            btn_row, text="比較実行", width=14,
             bg="#4a9eff", fg="white", font=("", 10, "bold"),
-            command=self._run_discover,
+            command=self._run_compare_pairs,
         )
-        self._s1_btn.pack(side="right")
+        self._btn_compare.pack(side="right")
+
+    def _show_main_view(self) -> None:
+        self._fr_step3_view.pack_forget()
+        self._fr_main_view.pack(fill="both", expand=True)
+
+    def _show_step3_view(self) -> None:
+        self._fr_main_view.pack_forget()
+        self._fr_step3_view.pack(fill="both", expand=True)
+
+    # ================================================================== ペアリング
+
+    def _browse_pairs(self) -> None:
+        path = filedialog.askopenfilename(
+            filetypes=[("JSON", "*.json"), ("All", "*.*")],
+        )
+        if path:
+            self._pairs_f.set(path)
+
+    def _reload_patterns(self) -> None:
+        try:
+            from excel_diff.patterns import PatternStore
+            store = PatternStore(cfg.patterns_file())
+            self._patterns = store.list_all()
+        except Exception:
+            self._patterns = []
+        values = [f"{p.id}  {p.name}" for p in self._patterns]
+        self._cmb_pat["values"] = values
+        # 保存済みIDにマッチするエントリを復元
+        saved_id = cfg.get("pair_build", "pattern_id", "")
+        if saved_id:
+            matching = [v for v in values if v.split()[0] == saved_id]
+            if matching and not self._pat_id.get().strip():
+                self._pat_id.set(matching[0])
+        if not self._pat_id.get().strip() and values:
+            self._pat_id.set(values[0])
+
+    def _on_pairing_change(self) -> None:
+        method = self._pairing.get()
+        self._entry_pairs.config(state="normal"   if method == "pairs"   else "disabled")
+        self._btn_pairs.config(  state="normal"   if method == "pairs"   else "disabled")
+        self._cmb_pat.config(    state="readonly"  if method == "pattern" else "disabled")
+        self._btn_discover.config(state="normal"  if method == "wizard"  else "disabled")
+        if method != "wizard":
+            self._schedule_rebuild()
+
+    def _schedule_rebuild(self) -> None:
+        """200ms デバウンスでペアリスト再構築。"""
+        if self._rebuild_after_id is not None:
+            try:
+                self.after_cancel(self._rebuild_after_id)
+            except Exception:
+                pass
+        self._rebuild_after_id = self.after(200, self._rebuild_pairs_now)
+
+    def _rebuild_pairs_now(self) -> None:
+        self._rebuild_after_id = None
+        method = self._pairing.get()
+        if method == "wizard":
+            return  # 探索実行ボタンでのみ更新
+
+        old = self._old_dir.get().strip()
+        new = self._new_dir.get().strip()
+
+        if not old or not new or not os.path.isdir(old) or not os.path.isdir(new):
+            self._pairs = []
+            self._populate_pairs()
+            return
+
+        try:
+            if method == "exact":
+                from excel_diff.file_pairing import FilePair
+                old_files = {
+                    f for f in os.listdir(old)
+                    if f.lower().endswith(".xlsx") and not f.startswith("~$")
+                }
+                new_files = {
+                    f for f in os.listdir(new)
+                    if f.lower().endswith(".xlsx") and not f.startswith("~$")
+                }
+                all_names = sorted(old_files | new_files)
+                self._pairs = [
+                    FilePair(
+                        old_name=name if name in old_files else None,
+                        new_name=name if name in new_files else None,
+                        score=1.0, matched_by="exact",
+                    )
+                    for name in all_names
+                ]
+
+            elif method == "pairs":
+                pf = self._pairs_f.get().strip()
+                if not pf or not os.path.isfile(pf):
+                    self._pairs = []
+                else:
+                    from excel_diff.file_pairing import load_pairs
+                    self._pairs = load_pairs(pf)
+
+            elif method == "pattern":
+                pat_sel = self._pat_id.get().strip()
+                pat_id = pat_sel.split()[0] if pat_sel else ""
+                if not pat_id:
+                    self._pairs = []
+                else:
+                    from excel_diff.patterns import PatternStore
+                    from excel_diff.file_pairing import apply_pattern
+                    store = PatternStore(cfg.patterns_file())
+                    pat = store.get(pat_id)
+                    self._pairs = apply_pattern(old, new, pat.key_regex) if pat else []
+
+        except Exception as e:
+            self._log(f"ペアリスト構築エラー: {e}")
+            self._pairs = []
+
+        self._populate_pairs()
+
+    def _populate_pairs(self) -> None:
+        for row in self._tree_pairs.get_children():
+            self._tree_pairs.delete(row)
+        kind_map = {
+            "exact":         "完全一致",
+            "auto":          "自動",
+            "pattern":       "パターン",
+            "unmatched_old": "旧のみ",
+            "unmatched_new": "新のみ",
+        }
+        for i, p in enumerate(self._pairs):
+            old_disp   = p.old_name or "（なし）"
+            new_disp   = p.new_name or "（なし）"
+            score_disp = f"{p.score:.2f}" if p.score > 0 else "-"
+            kind_disp  = kind_map.get(p.matched_by, p.matched_by)
+            tags = ("unmatched",) if not p.old_name or not p.new_name else ()
+            self._tree_pairs.insert(
+                "", "end", iid=str(i),
+                values=(old_disp, new_disp, score_disp, kind_disp),
+                tags=tags,
+            )
+
+    # ================================================================== ウィザード探索
 
     def _run_discover(self) -> None:
-        old = self._s1_old.get().strip()
-        new = self._s1_new.get().strip()
+        old = self._old_dir.get().strip()
+        new = self._new_dir.get().strip()
         if not old or not new:
             messagebox.showerror("エラー", "旧フォルダと新フォルダを指定してください")
             return
@@ -205,9 +418,7 @@ class TabPatterns(tk.Frame):
         if not os.path.isdir(new):
             messagebox.showerror("エラー", f"フォルダが見つかりません:\n{new}")
             return
-        self._old_dir = old
-        self._new_dir = new
-        self._s1_btn.config(state="disabled", text="探索中...")
+        self._btn_discover.config(state="disabled", text="探索中...")
         self._log(f"ペア候補を探索中: {old} / {new}")
         self._result_q = get_worker().submit(
             self._do_discover, old, new, self._s1_thr.get(),
@@ -223,88 +434,17 @@ class TabPatterns(tk.Frame):
             return
         try:
             status, val = self._result_q.get_nowait()
-            self._s1_btn.config(state="normal", text="探索実行")
+            self._btn_discover.config(state="normal", text="探索実行")
             if status == "err":
                 self._log(f"探索エラー: {val}")
             else:
                 self._pairs = val
                 self._log(f"探索完了: {len(val)} ペア候補")
-                self._populate_step2()
-                self._show_step(2)
+                self._populate_pairs()
         except queue.Empty:
             self.after(100, self._poll_discover)
 
-    # ================================================================== ステップ②
-
-    def _build_step2(self, parent: tk.Frame) -> None:
-        tk.Label(parent, text="ステップ②: ペア確認・調整", font=("", 9, "bold")).pack(
-            anchor="w", padx=8, pady=(6, 2))
-
-        # 探索対象フォルダを表示
-        self._lbl_dirs = tk.Label(
-            parent, text="", fg="#444444", font=("", 8),
-            anchor="w", justify="left",
-        )
-        self._lbl_dirs.pack(anchor="w", padx=8, pady=(0, 4))
-
-        cols = ("old", "new", "score", "kind")
-        self._tree_pairs = ttk.Treeview(
-            parent, columns=cols, show="headings", height=6, selectmode="browse",
-        )
-        for col, head, w in zip(cols, ("旧ファイル", "新ファイル", "スコア", "種別"),
-                                 (190, 190, 60, 80)):
-            self._tree_pairs.heading(col, text=head)
-            self._tree_pairs.column(col, width=w, anchor="w")
-        self._tree_pairs.tag_configure("unmatched", foreground="#888888")
-
-        sb2 = ttk.Scrollbar(parent, orient="vertical", command=self._tree_pairs.yview)
-        self._tree_pairs.configure(yscrollcommand=sb2.set)
-        fr_tree = tk.Frame(parent)
-        fr_tree.pack(fill="both", expand=True, padx=8, pady=(0, 2))
-        self._tree_pairs.pack(side="left", fill="both", expand=True)
-        sb2.pack(side="left", fill="y")
-
-        tk.Label(parent,
-                 text="※「旧のみ」「新のみ」の行は比較対象外として扱われます",
-                 fg="gray", font=("", 8)).pack(anchor="w", padx=8)
-
-        # ボタン 2 行
-        btn_row1 = tk.Frame(parent)
-        btn_row1.pack(fill="x", padx=8, pady=(6, 2))
-        tk.Button(btn_row1, text="← やり直す",
-                  command=self._back_to_step1).pack(side="left")
-        tk.Button(btn_row1, text="パターン生成 →",
-                  bg="#4a9eff", fg="white", font=("", 9, "bold"),
-                  command=self._goto_step3).pack(side="right")
-
-        btn_row2 = tk.Frame(parent)
-        btn_row2.pack(fill="x", padx=8, pady=(0, 8))
-        tk.Button(btn_row2, text="JSON 保存",
-                  command=self._save_pairs_json).pack(side="left")
-        tk.Button(btn_row2, text="そのまま比較",      # ← 変更
-                  command=self._run_compare_pairs).pack(side="left", padx=8)
-
-    def _populate_step2(self) -> None:
-        self._lbl_dirs.config(text=f"旧: {self._old_dir}\n新: {self._new_dir}")
-        for row in self._tree_pairs.get_children():
-            self._tree_pairs.delete(row)
-        kind_map = {
-            "exact": "完全一致", "auto": "自動", "pattern": "パターン",
-            "unmatched_old": "旧のみ", "unmatched_new": "新のみ",
-        }
-        for i, p in enumerate(self._pairs):
-            old_disp = p.old_name or "（なし）"
-            new_disp = p.new_name or "（なし）"
-            score_disp = f"{p.score:.2f}" if p.score > 0 else "-"
-            kind_disp = kind_map.get(p.matched_by, p.matched_by)
-            tags = ("unmatched",) if not p.old_name or not p.new_name else ()
-            self._tree_pairs.insert("", "end", iid=str(i),
-                                    values=(old_disp, new_disp, score_disp, kind_disp),
-                                    tags=tags)
-
-    def _back_to_step1(self) -> None:
-        self._pairs = []
-        self._show_step(1)
+    # ================================================================== JSON保存
 
     def _save_pairs_json(self) -> None:
         path = filedialog.asksaveasfilename(
@@ -316,47 +456,11 @@ class TabPatterns(tk.Frame):
         try:
             from excel_diff.file_pairing import save_pairs
             save_pairs(self._pairs, path)
-            self._log(f"ペアJSON保存: {path}（フォルダ比較タブの「ペアJSON」で再利用可）")
+            self._log(f"ペアJSON保存: {path}（ペアリング方法「ペアJSON」で再利用可）")
         except Exception as e:
             self._log(f"保存エラー: {e}")
 
-    # ── 比較確認ポップアップ ─────────────────────────────────────────────
-
-    def _ask_compare_or_settings(self) -> Optional[str]:
-        """'ok' / 'settings' / None(閉じた) を返す"""
-        result: dict = {"v": None}
-        dlg = tk.Toplevel(self)
-        dlg.title("比較実行の確認")
-        dlg.resizable(False, False)
-        dlg.transient(self.winfo_toplevel())
-        dlg.grab_set()
-
-        tk.Label(
-            dlg,
-            text="フォルダ比較に設定されたオプションで\n実行されますが良いですか？",
-            pady=10, padx=20,
-        ).pack()
-
-        btn_fr = tk.Frame(dlg)
-        btn_fr.pack(pady=(0, 12), padx=20)
-        tk.Button(btn_fr, text="OK", width=10,
-                  command=lambda: (result.__setitem__("v", "ok"), dlg.destroy())
-                  ).pack(side="left", padx=6)
-        tk.Button(btn_fr, text="フォルダ比較の設定に戻る",
-                  command=lambda: (result.__setitem__("v", "settings"), dlg.destroy())
-                  ).pack(side="left", padx=6)
-
-        self.winfo_toplevel().update_idletasks()
-        rx = self.winfo_toplevel().winfo_x()
-        ry = self.winfo_toplevel().winfo_y()
-        rw = self.winfo_toplevel().winfo_width()
-        rh = self.winfo_toplevel().winfo_height()
-        dlg.update_idletasks()
-        dw, dh = dlg.winfo_width(), dlg.winfo_height()
-        dlg.geometry(f"+{rx + (rw - dw) // 2}+{ry + (rh - dh) // 2}")
-
-        dlg.wait_window()
-        return result["v"]
+    # ================================================================== 比較実行
 
     def _run_compare_pairs(self) -> None:
         matched = [p for p in self._pairs if p.old_name and p.new_name]
@@ -364,27 +468,25 @@ class TabPatterns(tk.Frame):
             messagebox.showinfo("情報", "比較可能なペアがありません")
             return
 
-        choice = self._ask_compare_or_settings()
-        if choice == "settings":
-            if self._switch_to_dir_diff:
-                self._switch_to_dir_diff()
-            return
-        if choice != "ok":
-            return
+        old = self._old_dir.get().strip()
+        new = self._new_dir.get().strip()
 
         options = (
-            self._get_dir_diff_options()
-            if self._get_dir_diff_options is not None
+            self._get_compare_options()
+            if self._get_compare_options is not None
             else cfg.data("dir_diff")
         )
         self._compare_open_browser = options.get("open_browser", True)
-        self._log(f"そのまま比較: {len(matched)} 件（フォルダ比較タブの設定を使用）")
+        unmatched = [p for p in self._pairs if not p.old_name or not p.new_name]
+
+        self._log(f"比較実行: {len(matched)} 件")
+        self._btn_compare.config(state="disabled", text="実行中...")
         self._result_q = get_worker().submit(
-            self._do_compare_pairs, matched, self._old_dir, self._new_dir, options,
+            self._do_compare_pairs, matched, unmatched, old, new, options,
         )
         self.after(100, self._poll_compare)
 
-    def _do_compare_pairs(self, matched, old_dir, new_dir, options: dict):
+    def _do_compare_pairs(self, matched, unmatched, old_dir, new_dir, options: dict):
         from excel_diff.reader import read_workbook
         from excel_diff.diff_engine import diff_files
         from excel_diff.html_renderer import render
@@ -414,7 +516,7 @@ class TabPatterns(tk.Frame):
         else:
             config.diff_mode = "lcs"
 
-        # ── 実行条件サマリ ──────────────────────────────────────────
+        # 実行条件サマリ
         from openpyxl.utils import get_column_letter as _gcl
         log_lines = ["─" * 36]
         log_lines.append(f"[実行条件] 旧: {old_dir}")
@@ -430,8 +532,6 @@ class TabPatterns(tk.Frame):
         log_lines.append(f"[実行条件] 差分モード: {config.diff_mode}")
         log_lines.append(f"[実行条件] シート: {sheet or '全シート'}")
         log_lines.append("─" * 36)
-        # ワーカースレッドから直接 _log を呼ぶのは非スレッドセーフだが
-        # 既存コードと同方針（Windows 上では実用上問題なし）
         for line in log_lines:
             self._log(line)
 
@@ -448,19 +548,21 @@ class TabPatterns(tk.Frame):
             try:
                 old_sheets = read_workbook(old_path, strikethrough, sheet)
                 new_sheets = read_workbook(new_path, strikethrough, sheet)
-                fd = diff_files(old_sheets, new_sheets, old_path, new_path,
-                                include_strike=strikethrough, config=config)
+                fd = diff_files(
+                    old_sheets, new_sheets, old_path, new_path,
+                    include_strike=strikethrough, config=config,
+                )
                 out_path = os.path.join(out_dir, f"{Path(pair.new_name).stem}_diff.html")
                 Path(out_path).write_text(render(fd), encoding="utf-8")
                 results.append((pair, fd, out_path))
             except Exception as e:
+                self._log(f"  ⚠ スキップ ({pair.old_name}): {e}")
                 skipped.append(pair.old_name)
-                # skipped リストは return 後に index に含めないためここでは記録のみ
 
-        unmatched = [p for p in self._pairs if not p.old_name or not p.new_name]
         index_path = os.path.join(out_dir, "★index.html")
         Path(index_path).write_text(
-            _render_index_html(results, unmatched, old_dir, new_dir), encoding="utf-8")
+            _render_index_html(results, unmatched, old_dir, new_dir), encoding="utf-8",
+        )
         return index_path, skipped
 
     def _poll_compare(self) -> None:
@@ -468,6 +570,7 @@ class TabPatterns(tk.Frame):
             return
         try:
             status, val = self._result_q.get_nowait()
+            self._btn_compare.config(state="normal", text="比較実行")
             if status == "err":
                 self._log(f"比較エラー: {val}")
             else:
@@ -478,9 +581,10 @@ class TabPatterns(tk.Frame):
                 self._log(f"比較完了 → {index_path}")
                 if self._compare_open_browser:
                     webbrowser.open(Path(index_path).resolve().as_uri())
-                self._back_to_step1()
         except queue.Empty:
             self.after(100, self._poll_compare)
+
+    # ================================================================== パターン生成（案A: 画面切替）
 
     def _goto_step3(self) -> None:
         matched = [p for p in self._pairs if p.old_name and p.new_name]
@@ -489,7 +593,6 @@ class TabPatterns(tk.Frame):
             return
         suggested = self._smart_suggest_regex(self._pairs)
         self._s3_regex.set(suggested)
-        # テンプレートから生成された場合は readonly、それ以外は手動入力モード
         from_template = self._s3_tpl.get() != _TEMPLATES[-1][0]
         self._s3_manual.set(not from_template)
         self._on_manual_toggle()
@@ -497,13 +600,12 @@ class TabPatterns(tk.Frame):
         self._validated_ok = False
         self._btn_save_pat.config(state="disabled")
         self._lbl_validate.config(text="")
-        self._show_step(3)
-
-    # ================================================================== ステップ③
+        self._show_step3_view()
 
     def _build_step3(self, parent: tk.Frame) -> None:
-        tk.Label(parent, text="ステップ③: パターン生成・検証・保存", font=("", 9, "bold")).pack(
-            anchor="w", padx=8, pady=(6, 2))
+        tk.Label(
+            parent, text="パターン生成・検証・保存", font=("", 9, "bold"),
+        ).pack(anchor="w", padx=8, pady=(6, 2))
 
         meta_fr = tk.Frame(parent)
         meta_fr.pack(fill="x", padx=8, pady=2)
@@ -563,14 +665,19 @@ class TabPatterns(tk.Frame):
         self._tree_prev.pack(side="left", fill="both", expand=True)
         sb3.pack(side="left", fill="y")
 
-        self._lbl_validate = tk.Label(parent, text="", wraplength=500, justify="left",
-                                      fg="red", font=("", 9))
+        self._lbl_validate = tk.Label(
+            parent, text="", wraplength=500, justify="left", fg="red", font=("", 9),
+        )
         self._lbl_validate.pack(anchor="w", padx=8, pady=2)
 
         btn_row = tk.Frame(parent)
         btn_row.pack(fill="x", padx=8, pady=(4, 8))
-        tk.Button(btn_row, text="← 戻る", command=self._back_to_step2).pack(side="left")
-        tk.Button(btn_row, text="検証実行", command=self._validate_pattern).pack(side="left", padx=8)
+        tk.Button(
+            btn_row, text="← ペアリストへ戻る", command=self._show_main_view,
+        ).pack(side="left")
+        tk.Button(
+            btn_row, text="検証実行", command=self._validate_pattern,
+        ).pack(side="left", padx=8)
         self._btn_save_pat = tk.Button(
             btn_row, text="保存", state="disabled",
             bg="#4a9eff", fg="white", font=("", 9, "bold"),
@@ -675,30 +782,55 @@ class TabPatterns(tk.Frame):
             store.add_or_update(PatternDef(
                 id=pat_id, name=pat_name, key_regex=regex,
                 description=self._s3_desc.get().strip(),
-                example_old_dir=self._old_dir,
-                example_new_dir=self._new_dir,
+                example_old_dir=self._old_dir.get(),
+                example_new_dir=self._new_dir.get(),
                 created_at=date.today().isoformat(),
             ))
             store.save()
             self._log(f"パターン保存: [{pat_id}] {pat_name}  regex={regex}")
             self._refresh_list()
-            self._pairs = []
-            self._show_step(1)
+            self._show_main_view()
         except Exception as e:
             self._log(f"保存エラー: {e}")
 
-    def _back_to_step2(self) -> None:
-        self._show_step(2)
+    # ================================================================== パターン一覧
+
+    def _refresh_list(self) -> None:
+        for row in self._tree_list.get_children():
+            self._tree_list.delete(row)
+        try:
+            from excel_diff.patterns import PatternStore
+            for p in PatternStore(cfg.patterns_file()).list_all():
+                self._tree_list.insert("", "end", iid=p.id,
+                                       values=(p.id, p.name, p.key_regex, p.created_at))
+        except Exception as e:
+            self._log(f"パターン一覧の読み込みエラー: {e}")
+
+    def _delete_pattern(self) -> None:
+        sel = self._tree_list.selection()
+        if not sel:
+            messagebox.showinfo("情報", "削除するパターンを選択してください")
+            return
+        pat_id = sel[0]
+        if not messagebox.askyesno("確認", f"パターン「{pat_id}」を削除しますか？"):
+            return
+        try:
+            from excel_diff.patterns import PatternStore
+            store = PatternStore(cfg.patterns_file())
+            store._patterns = [p for p in store._patterns if p.id != pat_id]
+            store.save()
+            self._log(f"パターン削除: {pat_id}")
+            self._refresh_list()
+        except Exception as e:
+            self._log(f"削除エラー: {e}")
 
     # ================================================================== インテリジェント正規表現生成
 
     def _smart_suggest_regex(self, pairs: list) -> str:
-        """ファイル名パターンを分析し、3段階で最適な正規表現を自動提案する。"""
         all_files = [f for p in pairs for f in (p.old_name, p.new_name) if f]
         if not all_files:
             return ""
 
-        # ── Step 1: 定義済みテンプレートで最もマッチするものを採用 ──────
         best_tpl_name, best_tpl_regex, best_score = _TEMPLATES[-1][0], "", 0.0
         for tpl_name, tpl_regex in _TEMPLATES[:-1]:
             try:
@@ -713,7 +845,6 @@ class TabPatterns(tk.Frame):
             self._s3_tpl.set(best_tpl_name)
             return best_tpl_regex
 
-        # ── Step 2: file_pairing.generate_regex() を試す ────────────────
         matched = [p for p in pairs if p.old_name and p.new_name]
         try:
             from excel_diff.file_pairing import generate_regex
@@ -724,7 +855,6 @@ class TabPatterns(tk.Frame):
         except Exception:
             pass
 
-        # ── Step 3: LCP/LCS 方式で変動部分を特定してパターン生成 ─────────
         differing = [
             (p.old_name, p.new_name)
             for p in matched if p.old_name != p.new_name
@@ -738,49 +868,46 @@ class TabPatterns(tk.Frame):
             old_base, old_ext = os.path.splitext(old_f)
             new_base          = os.path.splitext(new_f)[0]
             ext_set.add(old_ext.lower())
-
             lcp = _lcp_len(old_base, new_base)
             lcs = _lcs_len(old_base, new_base)
-
             old_var = old_base[lcp : len(old_base) - lcs] if lcs else old_base[lcp:]
             new_var = new_base[lcp : len(new_base) - lcs] if lcs else new_base[lcp:]
-
             if not old_var or not new_var:
                 continue
-
             prefix_raw = old_base[:lcp]
             sep = prefix_raw[-1] if prefix_raw and prefix_raw[-1] in "_-" else ""
             analyses.append((sep, _classify_var(old_var), _classify_var(new_var)))
 
         if not analyses:
             return ""
-
         seps = {a[0] for a in analyses}
         if len(seps) > 1:
-            return ""  # セパレータが不統一
-
+            return ""
         sep    = list(seps)[0]
         sep_re = re.escape(sep) if sep else ""
-
         var_pats = {a[1] for a in analyses} | {a[2] for a in analyses}
         if r".+" in var_pats and len(var_pats) > 1:
-            var_pats.discard(r".+")   # 具体パターンを優先
+            var_pats.discard(r".+")
         var_re = (
             list(var_pats)[0]
             if len(var_pats) == 1
             else f"(?:{'|'.join(sorted(var_pats))})"
         )
-
         ext    = list(ext_set)[0] if len(ext_set) == 1 else ".xlsx"
         ext_re = re.escape(ext)
-
         self._s3_tpl.set(_TEMPLATES[-1][0])
         return f"^(.+?){sep_re}{var_re}{ext_re}$"
 
-    # ================================================================== ステップ切り替え
+    # ================================================================== 状態保存
 
-    def _show_step(self, n: int) -> None:
-        for fr in (self._fr_step1, self._fr_step2, self._fr_step3):
-            fr.pack_forget()
-        {1: self._fr_step1, 2: self._fr_step2, 3: self._fr_step3}[n].pack(
-            fill="both", expand=True)
+    def save_state(self) -> None:
+        """現在のUI値を設定に書き戻す（ウィンドウを閉じる前に呼ばれる）。"""
+        pat_sel = self._pat_id.get().strip()
+        pat_id  = pat_sel.split()[0] if pat_sel else ""
+        cfg.set_tab("pair_build", {
+            "old_dir":    self._old_dir.get(),
+            "new_dir":    self._new_dir.get(),
+            "pairing":    self._pairing.get(),
+            "pairs_file": self._pairs_f.get(),
+            "pattern_id": pat_id,
+        })

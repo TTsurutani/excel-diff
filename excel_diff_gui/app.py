@@ -43,22 +43,30 @@ class App(_AppBase):
         self._log_area = LogArea(paned, height=7)
         paned.add(self._log_area, weight=1)
 
+        # タブ①: フォルダ比較（条件設定）
+        tab_dir = TabDirDiff(nb, self._log)  # switch_to_pair_build は後で設定
+        self._tab_dir = tab_dir
+
+        # タブ②: フォルダ比較（ペアリング・比較実行）
+        tab_patterns = TabPatterns(
+            nb, self._log,
+            get_compare_options=tab_dir.get_compare_options,
+        )
+        self._tab_patterns = tab_patterns
+
+        # タブ①のナビゲーションボタンがタブ②を指すよう後から設定
+        tab_dir._switch_to_pair_build = lambda: nb.select(tab_patterns)
+
+        # タブ③: ファイル比較
         self._tab_file = TabFileDiff(nb, self._log)
-        tab_dir = TabDirDiff(nb, self._log)
-        self._tab_dir  = tab_dir
+
+        # タブ④: シート分解
         self._tab_split = TabSplit(nb, self._log)
 
-        nb.add(self._tab_file, text="ファイル比較")
-        nb.add(tab_dir, text="フォルダ比較")
-        nb.add(self._tab_split, text="シート分解")
-        nb.add(
-            TabPatterns(
-                nb, self._log,
-                switch_to_dir_diff=lambda: nb.select(tab_dir),
-                get_dir_diff_options=tab_dir.get_options,
-            ),
-            text="パターン管理",
-        )
+        nb.add(tab_dir,           text="フォルダ比較（条件設定）")
+        nb.add(tab_patterns,      text="フォルダ比較（ペアリング・比較実行）")
+        nb.add(self._tab_file,    text="ファイル比較")
+        nb.add(self._tab_split,   text="シート分解")
 
         self.protocol("WM_DELETE_WINDOW", self._quit)
 
@@ -67,7 +75,7 @@ class App(_AppBase):
 
     def _quit(self) -> None:
         # 各タブの現在UI値を _data に書き戻してから保存
-        for tab in (self._tab_file, self._tab_dir, self._tab_split):
+        for tab in (self._tab_file, self._tab_dir, self._tab_patterns, self._tab_split):
             tab.save_state()
         cfg.save()
         self.destroy()
