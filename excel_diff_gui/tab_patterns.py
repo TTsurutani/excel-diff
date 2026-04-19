@@ -414,22 +414,27 @@ class TabPatterns(tk.Frame):
         Path(out_dir).mkdir(parents=True, exist_ok=True)
 
         results = []
+        skipped = []
         for pair in matched:
             old_path = os.path.join(old_dir, pair.old_name)
             new_path = os.path.join(new_dir, pair.new_name)
-            old_sheets = read_workbook(old_path, strikethrough, sheet)
-            new_sheets = read_workbook(new_path, strikethrough, sheet)
-            fd = diff_files(old_sheets, new_sheets, old_path, new_path,
-                            include_strike=strikethrough, config=config)
-            out_path = os.path.join(out_dir, f"{Path(pair.new_name).stem}_diff.html")
-            Path(out_path).write_text(render(fd), encoding="utf-8")
-            results.append((pair, fd, out_path))
+            try:
+                old_sheets = read_workbook(old_path, strikethrough, sheet)
+                new_sheets = read_workbook(new_path, strikethrough, sheet)
+                fd = diff_files(old_sheets, new_sheets, old_path, new_path,
+                                include_strike=strikethrough, config=config)
+                out_path = os.path.join(out_dir, f"{Path(pair.new_name).stem}_diff.html")
+                Path(out_path).write_text(render(fd), encoding="utf-8")
+                results.append((pair, fd, out_path))
+            except Exception as e:
+                skipped.append(pair.old_name)
+                # skipped リストは return 後に index に含めないためここでは記録のみ
 
         unmatched = [p for p in self._pairs if not p.old_name or not p.new_name]
         index_path = os.path.join(out_dir, "index.html")
         Path(index_path).write_text(
             _render_index_html(results, unmatched, old_dir, new_dir), encoding="utf-8")
-        return index_path
+        return index_path, skipped
 
     def _poll_compare(self) -> None:
         if self._result_q is None:
@@ -439,9 +444,13 @@ class TabPatterns(tk.Frame):
             if status == "err":
                 self._log(f"比較エラー: {val}")
             else:
-                self._log(f"比較完了 → {val}")
+                index_path, skipped = val
+                if skipped:
+                    for name in skipped:
+                        self._log(f"  ⚠ スキップ: {name}（無効な xlsx）")
+                self._log(f"比較完了 → {index_path}")
                 if self._compare_open_browser:
-                    webbrowser.open(Path(val).resolve().as_uri())
+                    webbrowser.open(Path(index_path).resolve().as_uri())
                 self._back_to_step1()
         except queue.Empty:
             self.after(100, self._poll_compare)
