@@ -356,6 +356,22 @@ class TabDirDiff(tk.Frame):
             config.diff_mode = "lcs"
             self._log("差分モード: LCS（行の出現順）")
 
+        # ── 実行条件サマリ ──────────────────────────────────────────
+        self._log("─" * 36)
+        self._log(f"[実行条件] 旧: {old_dir}")
+        self._log(f"[実行条件] 新: {new_dir}")
+        if config.global_col_filter is not None:
+            col_letters = sorted(get_column_letter(i + 1) for i in config.global_col_filter)
+            self._log(f"[実行条件] 比較列: {', '.join(col_letters)}  (raw='{include_cols}')")
+        else:
+            self._log(f"[実行条件] 比較列: 全列  (raw='{include_cols}')")
+        if config.diff_mode == "key":
+            key_letters = ", ".join(get_column_letter(c + 1) for c in config.key_cols)
+            self._log(f"[実行条件] キー列: {key_letters}")
+        self._log(f"[実行条件] シート: {sheet or '全シート'}")
+        self._log(f"[実行条件] ペアリング: {pairing_method}")
+        self._log("─" * 36)
+
         # 出力フォルダ決定
         old_name = Path(old_dir).name
         new_name = Path(new_dir).name

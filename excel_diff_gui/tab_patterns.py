@@ -408,6 +408,27 @@ class TabPatterns(tk.Frame):
         else:
             config.diff_mode = "lcs"
 
+        # ── 実行条件サマリ ──────────────────────────────────────────
+        from openpyxl.utils import get_column_letter as _gcl
+        log_lines = ["─" * 36]
+        log_lines.append(f"[実行条件] 旧: {old_dir}")
+        log_lines.append(f"[実行条件] 新: {new_dir}")
+        if config.global_col_filter is not None:
+            col_letters = sorted(_gcl(i + 1) for i in config.global_col_filter)
+            log_lines.append(f"[実行条件] 比較列: {', '.join(col_letters)}  (raw='{include_cols}')")
+        else:
+            log_lines.append(f"[実行条件] 比較列: 全列  (raw='{include_cols}')")
+        if config.diff_mode == "key" and config.key_cols:
+            key_letters = ", ".join(_gcl(c + 1) for c in config.key_cols)
+            log_lines.append(f"[実行条件] キー列: {key_letters}")
+        log_lines.append(f"[実行条件] 差分モード: {config.diff_mode}")
+        log_lines.append(f"[実行条件] シート: {sheet or '全シート'}")
+        log_lines.append("─" * 36)
+        # ワーカースレッドから直接 _log を呼ぶのは非スレッドセーフだが
+        # 既存コードと同方針（Windows 上では実用上問題なし）
+        for line in log_lines:
+            self._log(line)
+
         old_name = Path(old_dir).name
         new_name = Path(new_dir).name
         out_dir = output_dir_opt or str(Path(new_dir).parent / f"{old_name}_vs_{new_name}")
