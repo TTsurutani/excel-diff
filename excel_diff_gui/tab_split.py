@@ -77,7 +77,7 @@ class TabSplit(tk.Frame):
         # 前置・後置を 1 行にまとめて縦スペースを節約
         fr_presuf = tk.Frame(grp)
         fr_presuf.pack(fill="x", padx=6, pady=2)
-        tk.Label(fr_presuf, text="前置文字列", width=10, anchor="w").pack(side="left")
+        tk.Label(fr_presuf, text="前置文字列", width=14, anchor="w").pack(side="left")
         tk.Entry(fr_presuf, textvariable=self._prefix, width=16).pack(side="left")
         tk.Label(fr_presuf, text="  後置文字列", anchor="w").pack(side="left")
         tk.Entry(fr_presuf, textvariable=self._suffix, width=16).pack(side="left")

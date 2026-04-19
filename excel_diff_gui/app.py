@@ -38,10 +38,10 @@ class App(_AppBase):
         paned.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
 
         nb = ttk.Notebook(paned)
-        paned.add(nb, weight=5)
+        paned.add(nb, weight=4)
 
-        self._log_area = LogArea(paned, height=7)
-        paned.add(self._log_area, weight=1)
+        self._log_area = LogArea(paned, height=10)
+        paned.add(self._log_area, weight=2)
 
         # タブ①: フォルダ比較（条件設定）
         tab_dir = TabDirDiff(nb, self._log)  # switch_to_pair_build は後で設定
