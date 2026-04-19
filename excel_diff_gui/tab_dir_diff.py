@@ -365,24 +365,30 @@ class TabDirDiff(tk.Frame):
 
         # 各ペアを比較
         results = []
+        skipped = []
         for i, pair in enumerate(matched, 1):
             self._log(f"[{i}/{len(matched)}] {pair.old_name} → {pair.new_name}")
             old_path = os.path.join(old_dir, pair.old_name)
             new_path = os.path.join(new_dir, pair.new_name)
 
-            old_sheets = read_workbook(old_path, strikethrough, sheet or None)
-            new_sheets = read_workbook(new_path, strikethrough, sheet or None)
+            try:
+                old_sheets = read_workbook(old_path, strikethrough, sheet or None)
+                new_sheets = read_workbook(new_path, strikethrough, sheet or None)
 
-            file_diff = diff_files(
-                old_sheets, new_sheets, old_path, new_path,
-                include_strike=strikethrough, config=config,
-            )
+                file_diff = diff_files(
+                    old_sheets, new_sheets, old_path, new_path,
+                    include_strike=strikethrough, config=config,
+                )
 
-            out_name = f"{Path(pair.new_name).stem}_diff.html"
-            out_path = os.path.join(out_dir, out_name)
-            Path(out_path).write_text(render(file_diff), encoding="utf-8")
+                out_name = f"{Path(pair.new_name).stem}_diff.html"
+                out_path = os.path.join(out_dir, out_name)
+                Path(out_path).write_text(render(file_diff), encoding="utf-8")
 
-            results.append((pair, file_diff, out_path))
+                results.append((pair, file_diff, out_path))
+
+            except Exception as e:
+                self._log(f"  ⚠ スキップ ({pair.old_name}): {e}")
+                skipped.append(pair)
 
         # インデックスHTML生成
         index_path = os.path.join(out_dir, "index.html")
@@ -395,6 +401,7 @@ class TabDirDiff(tk.Frame):
         nodiff_count = len(results) - diff_count
         self._log(
             f"完了: 差分あり {diff_count} 件 / 差分なし {nodiff_count} 件"
+            + (f" / スキップ {len(skipped)} 件" if skipped else "")
             + (f" / 対象外 {len(unmatched)} 件" if unmatched else "")
             + f" → {index_path}"
         )
