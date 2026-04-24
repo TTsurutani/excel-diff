@@ -117,7 +117,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # --- 共通オプション ---
     p.add_argument("--sheet", metavar="NAME",
-                   help="指定シートのみ比較（省略時: 全シート）")
+                   help="指定シートのみ比較・完全一致（省略時: 全シート）")
+    p.add_argument("--sheet-old", metavar="PATTERN",
+                   help="old側シートを正規表現で指定（部分一致）。複数マッチ時は先頭を使用")
+    p.add_argument("--sheet-new", metavar="PATTERN",
+                   help="new側シートを正規表現で指定（部分一致）。複数マッチ時は先頭を使用")
     p.add_argument("--strikethrough", action="store_true",
                    help="取り消し線の有無も差分として扱う")
     p.add_argument("--matchers", metavar="FILE",
@@ -559,7 +563,7 @@ def _run_split(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 def _run_file_diff(args: argparse.Namespace) -> None:
-    from .reader import read_workbook
+    from .reader import read_workbook, filter_sheets_by_pattern
     from .diff_engine import diff_files
     from .html_renderer import render
 
@@ -575,10 +579,24 @@ def _run_file_diff(args: argparse.Namespace) -> None:
 
     config = _build_config(args)
 
+    sheet_old_pat = getattr(args, "sheet_old", None)
+    sheet_new_pat = getattr(args, "sheet_new", None)
+
     print(f"読み込み中: {old_path}")
     old_sheets = read_workbook(old_path, args.strikethrough, args.sheet)
+    if sheet_old_pat:
+        old_sheets = filter_sheets_by_pattern(old_sheets, sheet_old_pat)
+        if not old_sheets:
+            print(f"エラー: --sheet-old '{sheet_old_pat}' にマッチするシートがありません: {old_path}", file=sys.stderr)
+            sys.exit(1)
+
     print(f"読み込み中: {new_path}")
     new_sheets = read_workbook(new_path, args.strikethrough, args.sheet)
+    if sheet_new_pat:
+        new_sheets = filter_sheets_by_pattern(new_sheets, sheet_new_pat)
+        if not new_sheets:
+            print(f"エラー: --sheet-new '{sheet_new_pat}' にマッチするシートがありません: {new_path}", file=sys.stderr)
+            sys.exit(1)
 
     print("差分計算中...")
     file_diff = diff_files(
@@ -611,7 +629,7 @@ def _run_file_diff(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 def _run_dir_diff(args: argparse.Namespace) -> None:
-    from .reader import read_workbook
+    from .reader import read_workbook, filter_sheets_by_pattern
     from .diff_engine import diff_files
     from .html_renderer import render
     from .file_pairing import apply_pattern
@@ -671,6 +689,9 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
     os.makedirs(out_dir, exist_ok=True)
     print(f"出力先: {out_dir}/")
 
+    sheet_old_pat = getattr(args, "sheet_old", None)
+    sheet_new_pat = getattr(args, "sheet_new", None)
+
     # 比較処理
     results = []
     for pair in compare_pairs:
@@ -679,11 +700,21 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
 
         try:
             old_sheets = read_workbook(old_path, args.strikethrough, args.sheet) if os.path.isfile(old_path) else {}
+            if sheet_old_pat and old_sheets:
+                old_sheets = filter_sheets_by_pattern(old_sheets, sheet_old_pat)
+                if not old_sheets:
+                    print(f"  警告: --sheet-old '{sheet_old_pat}' にマッチするシートなし: {pair.old_name}  スキップします")
+                    continue
         except Exception as e:
             print(f"  警告: 旧ファイルを読み込めません（空として扱います）: {pair.old_name}  ({e})")
             old_sheets = {}
         try:
             new_sheets = read_workbook(new_path, args.strikethrough, args.sheet) if os.path.isfile(new_path) else {}
+            if sheet_new_pat and new_sheets:
+                new_sheets = filter_sheets_by_pattern(new_sheets, sheet_new_pat)
+                if not new_sheets:
+                    print(f"  警告: --sheet-new '{sheet_new_pat}' にマッチするシートなし: {pair.new_name}  スキップします")
+                    continue
         except Exception as e:
             print(f"  警告: 新ファイルを読み込めません（空として扱います）: {pair.new_name}  ({e})")
             new_sheets = {}
@@ -726,12 +757,13 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
             elif p.new_name and not p.old_name:
                 print(f"  [新のみ] {p.new_name}")
 
-    # インデックスHTMLを常に生成してブラウザで開く
+    # インデックスHTMLを生成
     index_path = os.path.join(out_dir, "★index.html")
     with open(index_path, "w", encoding="utf-8") as f:
         f.write(_render_index_html(results, unmatched, old_dir, new_dir))
     print(f"\nインデックス → {index_path}")
-    webbrowser.open(Path(index_path).resolve().as_uri())
+    if args.open:
+        webbrowser.open(Path(index_path).resolve().as_uri())
 
 
 # ---------------------------------------------------------------------------
