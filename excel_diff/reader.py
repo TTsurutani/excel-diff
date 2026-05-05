@@ -4,6 +4,7 @@ openpyxl を使ってシート・行・セルのデータを取り出す。
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 import openpyxl
@@ -89,3 +90,25 @@ def read_workbook(
 
     wb.close()
     return result
+
+
+def filter_sheets_by_pattern(
+    sheets: dict[str, SheetData],
+    pattern: str,
+) -> dict[str, SheetData]:
+    """
+    シート名に pattern を re.search で適用し、マッチしたシートを返す。
+    - 1枚マッチ: そのシートを返す
+    - 複数マッチ: 先頭の1枚のみ返す（警告出力）
+    - 0枚マッチ: 空dictを返す
+    """
+    matched = {name: sd for name, sd in sheets.items() if re.search(pattern, name)}
+    if len(matched) > 1:
+        names = list(matched.keys())
+        first = names[0]
+        print(
+            f"警告: シートパターン '{pattern}' が {len(matched)} 枚にマッチします: {names}。"
+            f"先頭の '{first}' を使用します。"
+        )
+        return {first: matched[first]}
+    return matched

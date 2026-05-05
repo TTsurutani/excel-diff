@@ -61,7 +61,7 @@ gui_settings.json     実行時に自動生成（.gitignore 済み）
 
 ### 対応CLIコマンド
 ```
-excel-diff <old> <new> [-o PATH] [--diff-mode key --key-cols C] [--sheet] [--include-cols] [--matchers] [--strikethrough] [--open]
+excel-diff <old> <new> [-o PATH] [--diff-mode key --key-cols C] [--sheet-old PATTERN] [--sheet-new PATTERN] [--include-cols] [--matchers] [--strikethrough] [--open]
 ```
 
 ### UI レイアウト
@@ -76,7 +76,8 @@ excel-diff <old> <new> [-o PATH] [--diff-mode key --key-cols C] [--sheet] [--inc
 
 ▼ オプション（折りたたみ）
   出力HTML      [________________________________] [参照]
-  比較シート    [____________]  ※空=全シート
+  旧シートパターン [____________]  ※空=全シート / 正規表現
+  新シートパターン [____________]  ※空=全シート / 正規表現
   比較列        [____________]  例: A:C,E
   マッチャーJSON[________________________________] [参照]
   ☐ 取り消し線も差分として扱う
@@ -101,7 +102,7 @@ excel-diff <old> <new> [-o PATH] [--diff-mode key --key-cols C] [--sheet] [--inc
 excel-diff --dir <old_dir> <new_dir>
   [--pairs FILE | --pattern ID]
   [--diff-mode key --key-cols C]
-  [--output-dir DIR] [--sheet] [--include-cols] [--matchers] [--strikethrough] [--open]
+  [--output-dir DIR] [--sheet-old PATTERN] [--sheet-new PATTERN] [--include-cols] [--matchers] [--strikethrough] [--open]
 ```
 
 ### UI レイアウト
@@ -122,7 +123,8 @@ excel-diff --dir <old_dir> <new_dir>
 
 ▼ オプション（折りたたみ）
   出力先フォルダ[________________________________] [参照]
-  比較シート    [____________]
+  旧シートパターン [____________]  ※空=全シート / 正規表現
+  新シートパターン [____________]  ※空=全シート / 正規表現
   比較列        [____________]
   マッチャーJSON[________________________________] [参照]
   ☐ 取り消し線も差分として扱う
@@ -339,7 +341,8 @@ _poll_queue
     "old_file": "",
     "new_file": "",
     "output": "",
-    "sheet": "",
+    "sheet_old": "",
+    "sheet_new": "",
     "include_cols": "",
     "matchers": "",
     "strikethrough": false,
@@ -354,7 +357,8 @@ _poll_queue
     "pairs_file": "",
     "pattern_id": "",
     "output_dir": "",
-    "sheet": "",
+    "sheet_old": "",
+    "sheet_new": "",
     "include_cols": "",
     "matchers": "",
     "strikethrough": false,
@@ -386,7 +390,8 @@ _poll_queue
 | `--key-cols SPEC` | ①② | キー列テキスト入力（キーJOIN選択時に活性化） |
 | `--output PATH` | ① | ファイル選択 |
 | `--output-dir DIR` | ②③ | フォルダ選択 |
-| `--sheet NAME` | ①② | テキスト入力 |
+| `--sheet-old PATTERN` | ①② | テキスト入力（正規表現、空=全シート） |
+| `--sheet-new PATTERN` | ①② | テキスト入力（正規表現、空=全シート） |
 | `--include-cols SPEC` | ①② | テキスト入力 |
 | `--matchers FILE` | ①② | ファイル選択 |
 | `--strikethrough` | ①② | チェックボックス |

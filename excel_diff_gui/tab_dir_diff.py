@@ -19,9 +19,10 @@ class TabDirDiff(tk.Frame):
         self._log = log
         self._switch_to_pair_build = switch_to_pair_build
 
-        self._out_dir  = tk.StringVar(value=cfg.get("dir_diff", "output_dir"))
-        self._sheet    = tk.StringVar(value=cfg.get("dir_diff", "sheet"))
-        self._cols     = tk.StringVar(value=cfg.get("dir_diff", "include_cols"))
+        self._out_dir   = tk.StringVar(value=cfg.get("dir_diff", "output_dir"))
+        self._sheet_old = tk.StringVar(value=cfg.get("dir_diff", "sheet_old"))
+        self._sheet_new = tk.StringVar(value=cfg.get("dir_diff", "sheet_new"))
+        self._cols      = tk.StringVar(value=cfg.get("dir_diff", "include_cols"))
         self._matchers = tk.StringVar(value=cfg.get("dir_diff", "matchers"))
         self._key_cols = tk.StringVar(value=cfg.get("dir_diff", "key_cols"))
         self._strike   = tk.BooleanVar(value=cfg.get("dir_diff", "strikethrough"))
@@ -65,9 +66,15 @@ class TabDirDiff(tk.Frame):
 
         fr = tk.Frame(grp_opt)
         fr.pack(fill="x", padx=6, pady=2)
-        tk.Label(fr, text="比較シート", width=14, anchor="w").pack(side="left")
-        tk.Entry(fr, textvariable=self._sheet).pack(side="left", fill="x", expand=True)
-        tk.Label(fr, text="空=全シート", fg="gray").pack(side="left", padx=4)
+        tk.Label(fr, text="旧シートパターン", width=14, anchor="w").pack(side="left")
+        tk.Entry(fr, textvariable=self._sheet_old).pack(side="left", fill="x", expand=True)
+        tk.Label(fr, text="空=全シート / 正規表現", fg="gray").pack(side="left", padx=4)
+
+        fr_sn = tk.Frame(grp_opt)
+        fr_sn.pack(fill="x", padx=6, pady=2)
+        tk.Label(fr_sn, text="新シートパターン", width=14, anchor="w").pack(side="left")
+        tk.Entry(fr_sn, textvariable=self._sheet_new).pack(side="left", fill="x", expand=True)
+        tk.Label(fr_sn, text="空=全シート / 正規表現", fg="gray").pack(side="left", padx=4)
 
         fr2 = tk.Frame(grp_opt)
         fr2.pack(fill="x", padx=6, pady=2)
@@ -117,7 +124,8 @@ class TabDirDiff(tk.Frame):
         """現在の比較オプションを返す。比較ペア構築タブから参照される。"""
         return {
             "output_dir":    self._out_dir.get().strip(),
-            "sheet":         self._sheet.get().strip(),
+            "sheet_old":     self._sheet_old.get().strip(),
+            "sheet_new":     self._sheet_new.get().strip(),
             "include_cols":  self._cols.get().strip(),
             "matchers":      self._matchers.get().strip(),
             "strikethrough": self._strike.get(),

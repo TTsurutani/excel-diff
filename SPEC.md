@@ -146,7 +146,9 @@ excel-diff.exe --split <ブック.xlsx> [--prefix TEXT] [--suffix TEXT] [--name-
 | `--pairs FILE` | フォルダ比較時に使用するペアJSONファイル（`--discover` で生成） | なし |
 | `--pattern ID` | フォルダ比較時のペアリングパターンID（`--pairs` より低優先） | なし（完全一致） |
 | `--patterns-file FILE` | パターン定義ファイルのパス | `patterns.json` |
-| `--sheet NAME` | 比較対象シートを絞り込み | 全シート |
+| `--sheet NAME` | 比較対象シートを絞り込み（完全一致） | 全シート |
+| `--sheet-old PATTERN` | old側の比較対象シートを正規表現で指定（部分一致）。複数マッチ時は先頭を使用 | なし |
+| `--sheet-new PATTERN` | new側の比較対象シートを正規表現で指定（部分一致）。複数マッチ時は先頭を使用 | なし |
 | `--strikethrough` | 取り消し線の有無も差分として扱う | 無効（値のみ比較） |
 | `--matchers FILE` | カスタムマッチャー／列フィルタ設定JSONファイル | なし |
 | `--include-cols SPEC` | 比較対象列の指定（例: `B:U`） | 全列比較 |
@@ -742,4 +744,4 @@ pyinstaller --onefile --name excel-diff --clean excel_diff/__main__.py
 | — | GUIモード（ファイル選択ダイアログ） | 低優先度 |
 | — | .xls 形式のサポート | 低優先度 |
 | — | マッチャータイプの追加（正規表現、数値許容誤差など） | 低優先度 |
-| — | `--sheet` の複数指定 | 低優先度 |
+| ✅ | `--sheet-old` / `--sheet-new`（old/new で異なるシート名の1対1比較） | 完了 |

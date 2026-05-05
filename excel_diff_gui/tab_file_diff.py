@@ -20,11 +20,12 @@ class TabFileDiff(tk.Frame):
         self._result_q: "queue.Queue | None" = None
 
         # 変数
-        self._old     = tk.StringVar(value=cfg.get("file_diff", "old_file"))
-        self._new     = tk.StringVar(value=cfg.get("file_diff", "new_file"))
-        self._out     = tk.StringVar(value=cfg.get("file_diff", "output"))
-        self._sheet   = tk.StringVar(value=cfg.get("file_diff", "sheet"))
-        self._cols    = tk.StringVar(value=cfg.get("file_diff", "include_cols"))
+        self._old       = tk.StringVar(value=cfg.get("file_diff", "old_file"))
+        self._new       = tk.StringVar(value=cfg.get("file_diff", "new_file"))
+        self._out       = tk.StringVar(value=cfg.get("file_diff", "output"))
+        self._sheet_old = tk.StringVar(value=cfg.get("file_diff", "sheet_old"))
+        self._sheet_new = tk.StringVar(value=cfg.get("file_diff", "sheet_new"))
+        self._cols      = tk.StringVar(value=cfg.get("file_diff", "include_cols"))
         self._matchers= tk.StringVar(value=cfg.get("file_diff", "matchers"))
         self._key_cols= tk.StringVar(value=cfg.get("file_diff", "key_cols"))
         self._strike  = tk.BooleanVar(value=cfg.get("file_diff", "strikethrough"))
@@ -129,9 +130,15 @@ class TabFileDiff(tk.Frame):
 
         fr = tk.Frame(g)
         fr.pack(fill="x", **pad)
-        tk.Label(fr, text="比較シート", width=14, anchor="w").pack(side="left")
-        tk.Entry(fr, textvariable=self._sheet).pack(side="left", fill="x", expand=True)
-        tk.Label(fr, text="空=全シート", fg="gray").pack(side="left", padx=4)
+        tk.Label(fr, text="旧シートパターン", width=14, anchor="w").pack(side="left")
+        tk.Entry(fr, textvariable=self._sheet_old).pack(side="left", fill="x", expand=True)
+        tk.Label(fr, text="空=全シート / 正規表現", fg="gray").pack(side="left", padx=4)
+
+        fr_sn = tk.Frame(g)
+        fr_sn.pack(fill="x", **pad)
+        tk.Label(fr_sn, text="新シートパターン", width=14, anchor="w").pack(side="left")
+        tk.Entry(fr_sn, textvariable=self._sheet_new).pack(side="left", fill="x", expand=True)
+        tk.Label(fr_sn, text="空=全シート / 正規表現", fg="gray").pack(side="left", padx=4)
 
         fr2 = tk.Frame(g)
         fr2.pack(fill="x", **pad)
@@ -159,7 +166,8 @@ class TabFileDiff(tk.Frame):
             "old_file":      self._old.get(),
             "new_file":      self._new.get(),
             "output":        self._out.get(),
-            "sheet":         self._sheet.get(),
+            "sheet_old":     self._sheet_old.get(),
+            "sheet_new":     self._sheet_new.get(),
             "include_cols":  self._cols.get(),
             "matchers":      self._matchers.get(),
             "strikethrough": self._strike.get(),
@@ -187,15 +195,16 @@ class TabFileDiff(tk.Frame):
             return
 
         cfg.set_tab("file_diff", {
-            "old_file": old, "new_file": new,
-            "output": self._out.get(),
-            "sheet": self._sheet.get(),
+            "old_file":  old, "new_file": new,
+            "output":    self._out.get(),
+            "sheet_old": self._sheet_old.get(),
+            "sheet_new": self._sheet_new.get(),
             "include_cols": self._cols.get(),
-            "matchers": self._matchers.get(),
+            "matchers":  self._matchers.get(),
             "strikethrough": self._strike.get(),
-            "open_browser": self._open_br.get(),
+            "open_browser":  self._open_br.get(),
             "diff_mode": self._mode.get(),
-            "key_cols": self._key_cols.get(),
+            "key_cols":  self._key_cols.get(),
         })
         cfg.save()
 
@@ -205,7 +214,8 @@ class TabFileDiff(tk.Frame):
         self._result_q = get_worker().submit(
             self._do_diff,
             old, new,
-            self._out.get().strip(), self._sheet.get().strip(),
+            self._out.get().strip(),
+            self._sheet_old.get().strip(), self._sheet_new.get().strip(),
             self._cols.get().strip(), self._matchers.get().strip(),
             self._strike.get(), self._mode.get(),
             self._key_cols.get().strip(), self._open_br.get(),
@@ -224,19 +234,30 @@ class TabFileDiff(tk.Frame):
             self.after(100, self._poll)
 
     def _do_diff(
-        self, old_file, new_file, output, sheet, include_cols,
+        self, old_file, new_file, output, sheet_old, sheet_new, include_cols,
         matchers_file, strikethrough, diff_mode, key_cols_str, open_browser,
     ) -> None:
-        from excel_diff.reader import read_workbook
+        from excel_diff.reader import read_workbook, filter_sheets_by_pattern
         from excel_diff.diff_engine import diff_files, RowTag
         from excel_diff.html_renderer import render
         from excel_diff.matcher import DiffConfig, parse_col_spec, parse_col_list, load_config
         from openpyxl.utils import get_column_letter
 
         self._log(f"読み込み中: {old_file}")
-        old_sheets = read_workbook(old_file, strikethrough, sheet or None)
+        old_sheets = read_workbook(old_file, strikethrough)
+        if sheet_old:
+            old_sheets = filter_sheets_by_pattern(old_sheets, sheet_old)
+            if not old_sheets:
+                self._log(f"警告: 旧シートパターン '{sheet_old}' にマッチするシートなし")
+                return
+
         self._log(f"読み込み中: {new_file}")
-        new_sheets = read_workbook(new_file, strikethrough, sheet or None)
+        new_sheets = read_workbook(new_file, strikethrough)
+        if sheet_new:
+            new_sheets = filter_sheets_by_pattern(new_sheets, sheet_new)
+            if not new_sheets:
+                self._log(f"警告: 新シートパターン '{sheet_new}' にマッチするシートなし")
+                return
 
         if matchers_file and os.path.isfile(matchers_file):
             config = load_config(matchers_file)

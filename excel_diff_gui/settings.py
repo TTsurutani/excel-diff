@@ -9,7 +9,8 @@ _DEFAULT: dict[str, Any] = {
         "old_file": "",
         "new_file": "",
         "output": "",
-        "sheet": "",
+        "sheet_old": "",
+        "sheet_new": "",
         "include_cols": "",
         "matchers": "",
         "strikethrough": False,
@@ -19,7 +20,8 @@ _DEFAULT: dict[str, Any] = {
     },
     "dir_diff": {
         "output_dir": "",
-        "sheet": "",
+        "sheet_old": "",
+        "sheet_new": "",
         "include_cols": "",
         "matchers": "",
         "strikethrough": False,
@@ -74,6 +76,12 @@ def _migrate(data: dict) -> None:
     for p in data.get("split_presets", []):
         if p.get("regex") == "^([^（]+)":
             p["regex"] = "^([^(（]+)"
+    # sheet → sheet_old / sheet_new への移行
+    for tab in ("file_diff", "dir_diff"):
+        if tab in data and "sheet" in data[tab]:
+            old_val = data[tab].pop("sheet")
+            data[tab].setdefault("sheet_old", old_val)
+            data[tab].setdefault("sheet_new", "")
 
 
 def _ensure_loaded() -> None:

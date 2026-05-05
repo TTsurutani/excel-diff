@@ -25,7 +25,7 @@ pyinstaller ^
     --onefile ^
     --name excel-diff ^
     --clean ^
-    excel_diff\__main__.py
+    main.py
 
 echo.
 if exist "dist\excel-diff.exe" (
