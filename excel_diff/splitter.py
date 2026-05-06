@@ -76,15 +76,16 @@ def _split_via_com(
         for sheet_name, out_path in zip(sheet_names, out_paths):
             wb = excel.Workbooks.Open(str(src_path))
             try:
+                # 削除前に対象シートを表示状態にする（xlSheetVisible = -1）
+                # ※先に可視化しないと「可視シートがゼロ」エラーになる
+                ws = wb.Sheets(sheet_name)
+                if ws.Visible != -1:
+                    ws.Visible = -1
+
                 # 対象シート以外を削除
                 for ws in list(wb.Sheets):
                     if ws.Name != sheet_name:
                         ws.Delete()
-
-                # 隠しシートを表示状態にする（xlSheetVisible = -1）
-                ws = wb.Sheets(sheet_name)
-                if ws.Visible != -1:
-                    ws.Visible = -1
 
                 # 他シート参照の名前定義を削除して #REF! エラーを防止
                 for dn in list(wb.Names):
