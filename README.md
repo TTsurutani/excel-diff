@@ -22,7 +22,11 @@ setup.bat
 ### 起動方法
 
 ```bat
+:: python版
 python -m excel_diff_gui
+
+:: EXE版（Pythonのインストール不要）
+excel-diff-gui.exe
 ```
 
 4つのタブを持つウィンドウが開く。
@@ -175,10 +179,16 @@ build_gui.bat
 
 ## CLIの基本的な使い方
 
+> 以下のコマンド例では `python -m excel_diff` と `excel-diff.exe`（`build.bat` でビルド後）を併記します。どちらも同じオプションが使えます。EXEを使う場合はパスを通すか `dist\` フォルダ内で実行してください。
+
 ### ファイルを1対1で比較する
 
 ```bat
+:: python版
 python -m excel_diff old.xlsx new.xlsx
+
+:: EXE版（Pythonのインストール不要）
+excel-diff.exe old.xlsx new.xlsx
 ```
 
 新ファイルと同じフォルダに `<新ファイル名>_diff.html` が生成される。
@@ -186,15 +196,21 @@ python -m excel_diff old.xlsx new.xlsx
 ```bat
 :: 出力先を指定する
 python -m excel_diff old.xlsx new.xlsx -o result.html
+excel-diff.exe old.xlsx new.xlsx -o result.html
 
 :: 生成後ブラウザで開く
 python -m excel_diff old.xlsx new.xlsx --open
+excel-diff.exe old.xlsx new.xlsx --open
 ```
 
 ### フォルダ内の全xlsxをまとめて比較する
 
 ```bat
+:: python版
 python -m excel_diff --dir old_dir new_dir
+
+:: EXE版
+excel-diff.exe --dir old_dir new_dir
 ```
 
 同名ファイルをそれぞれ比較し、`old_dir_vs_new_dir/` フォルダに各ファイルの差分HTMLを出力する。  
@@ -203,6 +219,7 @@ python -m excel_diff --dir old_dir new_dir
 ```bat
 :: 出力先フォルダを指定する
 python -m excel_diff --dir old_dir new_dir --output-dir diffs/
+excel-diff.exe --dir old_dir new_dir --output-dir diffs/
 ```
 
 #### インデックスHTML（★index.html）の内容
@@ -224,6 +241,7 @@ python -m excel_diff --dir old_dir new_dir --output-dir diffs/
 
 ```bat
 python -m excel_diff old.xlsx new.xlsx
+excel-diff.exe old.xlsx new.xlsx
 ```
 
 ### キーJOINモード（`--key-cols`）
@@ -234,9 +252,11 @@ python -m excel_diff old.xlsx new.xlsx
 ```bat
 :: C列をキーとして使用
 python -m excel_diff old.xlsx new.xlsx --key-cols C
+excel-diff.exe old.xlsx new.xlsx --key-cols C
 
 :: B列・C列の複合キー
 python -m excel_diff old.xlsx new.xlsx --key-cols B,C
+excel-diff.exe old.xlsx new.xlsx --key-cols B,C
 ```
 
 **動作仕様：**
@@ -372,9 +392,11 @@ python -m excel_diff old.xlsx new.xlsx --key-cols B,C
 ```bat
 :: B〜U列のみ比較
 python -m excel_diff old.xlsx new.xlsx --include-cols "B:U"
+excel-diff.exe old.xlsx new.xlsx --include-cols "B:U"
 
 :: A〜C列とE列のみ比較
 python -m excel_diff old.xlsx new.xlsx --include-cols "A:C,E"
+excel-diff.exe old.xlsx new.xlsx --include-cols "A:C,E"
 ```
 
 設定ファイルでシートごとに指定することも可能（詳細は `SPEC.md` 参照）。
@@ -389,6 +411,7 @@ python -m excel_diff old.xlsx new.xlsx --include-cols "A:C,E"
 
 ```bat
 python -m excel_diff --discover old_202401 new_202402 -o pairs.json
+excel-diff.exe --discover old_202401 new_202402 -o pairs.json
 ```
 
 ```
@@ -407,6 +430,7 @@ python -m excel_diff --discover old_202401 new_202402 -o pairs.json
 
 ```bat
 python -m excel_diff --dir old_202401 new_202402 --pairs pairs.json
+excel-diff.exe --dir old_202401 new_202402 --pairs pairs.json
 ```
 
 ### ③ パターンを生成・保存する（繰り返し比較用）
@@ -415,6 +439,7 @@ python -m excel_diff --dir old_202401 new_202402 --pairs pairs.json
 
 ```bat
 python -m excel_diff --gen-pattern pairs.json --id monthly --name "月次レポート"
+excel-diff.exe --gen-pattern pairs.json --id monthly --name "月次レポート"
 ```
 
 ```
@@ -427,6 +452,7 @@ python -m excel_diff --gen-pattern pairs.json --id monthly --name "月次レポ�
 
 ```bat
 python -m excel_diff --dir old_202402 new_202403 --pattern monthly
+excel-diff.exe --dir old_202402 new_202403 --pattern monthly
 ```
 
 ---
@@ -438,15 +464,19 @@ python -m excel_diff --dir old_202402 new_202403 --pattern monthly
 ```bat
 :: シート名のみ
 python -m excel_diff --split book.xlsx
+excel-diff.exe --split book.xlsx
 
 :: 前置文字列を付ける → 2024_シート名.xlsx
 python -m excel_diff --split book.xlsx --prefix "2024_"
+excel-diff.exe --split book.xlsx --prefix "2024_"
 
 :: 後置文字列を付ける → シート名_確定.xlsx
 python -m excel_diff --split book.xlsx --suffix "_確定"
+excel-diff.exe --split book.xlsx --suffix "_確定"
 
 :: 前置・後置と出力先フォルダを指定
 python -m excel_diff --split book.xlsx --prefix "2024_" --suffix "_v2" --output-dir out/
+excel-diff.exe --split book.xlsx --prefix "2024_" --suffix "_v2" --output-dir out/
 ```
 
 ### ファイル名の柔軟な指定（`--name-regex`）
@@ -456,9 +486,11 @@ python -m excel_diff --split book.xlsx --prefix "2024_" --suffix "_v2" --output-
 ```bat
 :: 「売上(Sales)」「売上（Sales）」→「売上.xlsx」（半角・全角括弧の前までを抽出）
 python -m excel_diff --split book.xlsx --name-regex "^([^(（]+)"
+excel-diff.exe --split book.xlsx --name-regex "^([^(（]+)"
 
 :: 「01_概要」→「概要.xlsx」（番号プレフィックスを除去）
 python -m excel_diff --split book.xlsx --name-regex "^\d+_(.+)"
+excel-diff.exe --split book.xlsx --name-regex "^\d+_(.+)"
 ```
 
 - 正規表現には **第1キャプチャグループ `(...)`** を1つ以上含める必要がある
@@ -499,6 +531,7 @@ python -m excel_diff --split book.xlsx --name-regex "^\d+_(.+)"
 
 ```bat
 python -m excel_diff old.xlsx new.xlsx --matchers matchers.json
+excel-diff.exe old.xlsx new.xlsx --matchers matchers.json
 ```
 
 外部CSVやExcelから対比表を読み込む `mapping_file` タイプもある（詳細は `SPEC.md` 参照）。

@@ -31,6 +31,8 @@ class TabPatterns(tk.Frame):
         self._compare_open_browser = True
         self._rebuild_after_id = None
         self._patterns: list = []
+        self._sort_col: str = ""
+        self._sort_rev: bool = False
 
         self._old_dir   = tk.StringVar(value=cfg.get("pair_build", "old_dir"))
         self._new_dir   = tk.StringVar(value=cfg.get("pair_build", "new_dir"))
@@ -160,13 +162,18 @@ class TabPatterns(tk.Frame):
         grp_pairs = tk.LabelFrame(paned, text="ペアリスト")
         paned.add(grp_pairs, weight=2)
 
+        self._summary_var = tk.StringVar(value="")
+        tk.Label(grp_pairs, textvariable=self._summary_var,
+                 font=("", 8), fg="#444444", anchor="w").pack(
+            fill="x", padx=6, pady=(2, 0))
+
         cols = ("old", "new", "score", "kind")
         self._tree_pairs = ttk.Treeview(
             grp_pairs, columns=cols, show="headings", height=6, selectmode="browse",
         )
-        for col, head, w in zip(cols, ("旧ファイル", "新ファイル", "スコア", "種別"),
-                                 (190, 190, 60, 80)):
-            self._tree_pairs.heading(col, text=head)
+        for col, w in zip(cols, (190, 190, 60, 80)):
+            self._tree_pairs.heading(col, text=self._PAIR_HEADS[col],
+                                     command=lambda c=col: self._on_pair_heading_click(c))
             self._tree_pairs.column(col, width=w, anchor="w")
         self._tree_pairs.tag_configure("unmatched", foreground="#888888")
         sb2 = ttk.Scrollbar(grp_pairs, orient="vertical", command=self._tree_pairs.yview)
@@ -305,21 +312,57 @@ class TabPatterns(tk.Frame):
 
         self._populate_pairs()
 
+    _KIND_MAP = {
+        "exact": "完全一致", "auto": "自動", "pattern": "パターン",
+        "unmatched_old": "旧のみ", "unmatched_new": "新のみ",
+    }
+    _PAIR_HEADS = {"old": "旧ファイル", "new": "新ファイル", "score": "スコア", "kind": "種別"}
+
+    def _on_pair_heading_click(self, col: str) -> None:
+        if self._sort_col == col:
+            self._sort_rev = not self._sort_rev
+        else:
+            self._sort_col = col
+            self._sort_rev = False
+        self._populate_pairs()
+
+    def _sorted_pairs(self) -> list:
+        if not self._sort_col:
+            return self._pairs
+        col, rev = self._sort_col, self._sort_rev
+        matched   = [p for p in self._pairs if p.old_name and p.new_name]
+        unmatched = [p for p in self._pairs if not p.old_name or not p.new_name]
+        if col == "old":
+            key = lambda p: (p.old_name or "").lower()
+        elif col == "new":
+            key = lambda p: (p.new_name or "").lower()
+        elif col == "score":
+            key = lambda p: p.score
+        else:
+            key = lambda p: self._KIND_MAP.get(p.matched_by, p.matched_by)
+        um_key = (lambda p: (p.old_name or p.new_name or "").lower()) if col in ("old", "new") else key
+        return sorted(matched, key=key, reverse=rev) + sorted(unmatched, key=um_key, reverse=rev)
+
     def _populate_pairs(self) -> None:
         for row in self._tree_pairs.get_children():
             self._tree_pairs.delete(row)
-        kind_map = {
-            "exact":         "完全一致",
-            "auto":          "自動",
-            "pattern":       "パターン",
-            "unmatched_old": "旧のみ",
-            "unmatched_new": "新のみ",
-        }
-        for i, p in enumerate(self._pairs):
+        for col, head in self._PAIR_HEADS.items():
+            ind = (" ▼" if self._sort_rev else " ▲") if col == self._sort_col else ""
+            self._tree_pairs.heading(col, text=head + ind)
+        paired   = [p for p in self._pairs if p.old_name and p.new_name]
+        only_old = sum(1 for p in self._pairs if p.old_name and not p.new_name)
+        only_new = sum(1 for p in self._pairs if p.new_name and not p.old_name)
+        sc1      = sum(1 for p in paired if p.score >= 1.0)
+        self._summary_var.set(
+            f"旧 {len(paired) + only_old}件  新 {len(paired) + only_new}件  "
+            f"ペア {len(paired)}件（スコア=1.0: {sc1}件・<1.0: {len(paired) - sc1}件）  "
+            f"旧のみ {only_old}件  新のみ {only_new}件"
+        )
+        for i, p in enumerate(self._sorted_pairs()):
             old_disp   = p.old_name or "（なし）"
             new_disp   = p.new_name or "（なし）"
             score_disp = f"{p.score:.2f}" if p.score > 0 else "-"
-            kind_disp  = kind_map.get(p.matched_by, p.matched_by)
+            kind_disp  = self._KIND_MAP.get(p.matched_by, p.matched_by)
             tags = ("unmatched",) if not p.old_name or not p.new_name else ()
             self._tree_pairs.insert(
                 "", "end", iid=str(i),
