@@ -4,6 +4,10 @@ Excelブックをシート単位のファイルに分解するモジュール。
 split_workbook(path, prefix, suffix, name_regex, output_dir) → list[str]
   各シートを <output_dir>/<prefix><ファイル名ベース><suffix>.xlsx として保存し、
   出力ファイルパスのリストを返す。
+
+Windows 環境では win32com (Excel COM) を優先使用し、データ入力規則・条件付き書式・
+ピボットテーブルなどを保持したまま分割する。win32com が利用できない場合は
+openpyxl にフォールバックする。
 """
 from __future__ import annotations
 
@@ -36,6 +40,90 @@ def _apply_name_regex(sheet_name: str, pattern: re.Pattern[str]) -> str:
     return sheet_name
 
 
+def _build_output_paths(
+    sheet_names: list[str],
+    prefix: str,
+    suffix: str,
+    compiled_regex: re.Pattern[str] | None,
+    out_dir: Path,
+) -> list[Path]:
+    paths = []
+    for sheet_name in sheet_names:
+        if compiled_regex is not None:
+            name_base = _apply_name_regex(sheet_name, compiled_regex)
+        else:
+            name_base = sheet_name
+        safe_name = _safe_filename(name_base)
+        paths.append(out_dir / f"{prefix}{safe_name}{suffix}.xlsx")
+    return paths
+
+
+def _split_via_com(
+    src_path: Path,
+    sheet_names: list[str],
+    out_paths: list[Path],
+) -> None:
+    """win32com (Excel COM) を使ってシート分割する。"""
+    import pythoncom
+    import win32com.client
+
+    # ワーカースレッドから呼ばれる場合に備えて COM を初期化
+    pythoncom.CoInitialize()
+    excel = win32com.client.DispatchEx("Excel.Application")
+    excel.Visible = False
+    excel.DisplayAlerts = False
+    try:
+        for sheet_name, out_path in zip(sheet_names, out_paths):
+            wb = excel.Workbooks.Open(str(src_path))
+            try:
+                # 対象シート以外を削除
+                for ws in list(wb.Sheets):
+                    if ws.Name != sheet_name:
+                        ws.Delete()
+
+                # 隠しシートを表示状態にする（xlSheetVisible = -1）
+                ws = wb.Sheets(sheet_name)
+                if ws.Visible != -1:
+                    ws.Visible = -1
+
+                # 他シート参照の名前定義を削除して #REF! エラーを防止
+                for dn in list(wb.Names):
+                    dn.Delete()
+
+                # xlOpenXMLWorkbook = 51 で .xlsx として保存
+                wb.SaveAs(str(out_path), FileFormat=51)
+            finally:
+                wb.Close(False)
+    finally:
+        excel.Quit()
+        pythoncom.CoUninitialize()
+
+
+def _split_via_openpyxl(
+    src_path: Path,
+    sheet_names: list[str],
+    out_paths: list[Path],
+) -> None:
+    """openpyxl を使ってシート分割する（win32com 非対応環境用フォールバック）。"""
+    from openpyxl import load_workbook
+
+    for sheet_name, out_path in zip(sheet_names, out_paths):
+        wb = load_workbook(str(src_path))
+        for name in list(wb.sheetnames):
+            if name != sheet_name:
+                del wb[name]
+
+        ws = wb[sheet_name]
+        if ws.sheet_state == 'hidden':
+            ws.sheet_state = 'visible'
+
+        for dn in list(wb.defined_names):
+            del wb.defined_names[dn]
+
+        wb.save(str(out_path))
+        wb.close()
+
+
 def split_workbook(
     path: str,
     prefix: str = "",
@@ -59,11 +147,6 @@ def split_workbook(
     -------
     出力ファイルパスのリスト（シート順）
     """
-    try:
-        from openpyxl import load_workbook
-    except ImportError as e:
-        raise ImportError("openpyxl が必要です: pip install openpyxl") from e
-
     compiled_regex: re.Pattern[str] | None = None
     if name_regex:
         compiled_regex = re.compile(name_regex)
@@ -72,44 +155,27 @@ def split_workbook(
                 f"--name-regex にはキャプチャグループ () が1つ以上必要です: {name_regex!r}"
             )
 
-    src_path = Path(path)
-    out_dir = Path(output_dir) if output_dir else src_path.parent
+    src_path = Path(path).resolve()
+    out_dir = Path(output_dir).resolve() if output_dir else src_path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # シート名を事前確認（ファイルを1回だけ開く）
-    wb_meta = load_workbook(path, read_only=True, data_only=True)
-    sheet_names = wb_meta.sheetnames
-    wb_meta.close()
+    # シート名を取得
+    try:
+        from openpyxl import load_workbook as _lw
+        wb_meta = _lw(str(src_path), read_only=True, data_only=True)
+        sheet_names = wb_meta.sheetnames
+        wb_meta.close()
+    except ImportError as e:
+        raise ImportError("openpyxl が必要です: pip install openpyxl") from e
 
-    output_paths: list[str] = []
+    out_paths = _build_output_paths(sheet_names, prefix, suffix, compiled_regex, out_dir)
 
-    for sheet_name in sheet_names:
-        # 元ブックを毎回フルロードしてシート以外を削除
-        wb = load_workbook(path)
-        for name in list(wb.sheetnames):
-            if name != sheet_name:
-                del wb[name]
+    # win32com を優先、利用不可なら openpyxl にフォールバック
+    try:
+        import win32com.client  # noqa: F401
+        import pythoncom        # noqa: F401
+        _split_via_com(src_path, sheet_names, out_paths)
+    except ImportError:
+        _split_via_openpyxl(src_path, sheet_names, out_paths)
 
-        # 最後のシートが隠し状態でないことを保証（openpyxl仕様）
-        ws = wb[sheet_name]
-        if ws.sheet_state == 'hidden':
-            ws.sheet_state = 'visible'
-
-        # 名前定義を全削除（他シート参照による #REF! エラー防止）
-        for dn in list(wb.defined_names):
-            del wb.defined_names[dn]
-
-        # ファイル名ベースを決定
-        if compiled_regex is not None:
-            name_base = _apply_name_regex(sheet_name, compiled_regex)
-        else:
-            name_base = sheet_name
-
-        safe_name = _safe_filename(name_base)
-        out_filename = f"{prefix}{safe_name}{suffix}.xlsx"
-        out_path = out_dir / out_filename
-        wb.save(str(out_path))
-        wb.close()
-        output_paths.append(str(out_path))
-
-    return output_paths
+    return [str(p) for p in out_paths]
