@@ -103,9 +103,6 @@ class TabPatterns(tk.Frame):
         self._cmb_pat = ttk.Combobox(fr_pat, width=18, state="disabled")
         self._cmb_pat.pack(side="left", padx=2)
         self._cmb_pat.bind("<<ComboboxSelected>>", self._on_pattern_select)
-        tk.Button(
-            fr_pat, text="更新", width=5, command=self._reload_patterns,
-        ).pack(side="left", padx=2)
 
         # ウィザード 行
         fr_wiz_radio = tk.Frame(grp_pairing)
@@ -196,8 +193,8 @@ class TabPatterns(tk.Frame):
 
         btn_fr = tk.Frame(grp_list)
         btn_fr.pack(side="left", padx=6, pady=4, anchor="n")
+        tk.Button(btn_fr, text="編集", width=8, command=self._edit_pattern).pack(pady=2)
         tk.Button(btn_fr, text="削除", width=8, command=self._delete_pattern).pack(pady=2)
-        tk.Button(btn_fr, text="更新", width=8, command=self._refresh_list).pack(pady=2)
 
     # ================================================================== ペアリング
 
@@ -208,12 +205,17 @@ class TabPatterns(tk.Frame):
         if path:
             self._pairs_f.set(path)
 
+    def _reload_all(self) -> None:
+        self._reload_patterns()
+        self._refresh_list()
+
     def _reload_patterns(self) -> None:
         try:
             from excel_diff.patterns import PatternStore
             store = PatternStore(cfg.patterns_file())
             self._patterns = store.list_all()
-        except Exception:
+        except Exception as e:
+            self._log(f"パターン読み込みエラー: {e}")
             self._patterns = []
         self._cmb_pat["values"] = [f"{p.id}  {p.name}" for p in self._patterns]
 
@@ -455,8 +457,7 @@ class TabPatterns(tk.Frame):
                 ))
                 store.save()
                 self._log(f"パターン保存: [{pat_id}] {pat_name}  regex={regex}")
-                self._reload_patterns()
-                self._refresh_list()
+                self._reload_all()
                 dlg.destroy()
             except Exception as e:
                 self._log(f"保存エラー: {e}")
@@ -625,6 +626,88 @@ class TabPatterns(tk.Frame):
         except Exception as e:
             self._log(f"パターン一覧の読み込みエラー: {e}")
 
+    def _edit_pattern(self) -> None:
+        sel = self._tree_list.selection()
+        if not sel:
+            messagebox.showinfo("情報", "編集するパターンを選択してください")
+            return
+        pat_id = sel[0]
+        pat = next((p for p in self._patterns if p.id == pat_id), None)
+        if pat is None:
+            messagebox.showerror("エラー", f"パターン「{pat_id}」が見つかりません")
+            return
+
+        dlg = tk.Toplevel(self)
+        dlg.title("パターン編集")
+        dlg.resizable(False, False)
+        dlg.transient(self.winfo_toplevel())
+        dlg.grab_set()
+
+        frm = tk.Frame(dlg, padx=14, pady=10)
+        frm.pack(fill="both", expand=True)
+        frm.columnconfigure(1, weight=1)
+
+        tk.Label(frm, text="ID", anchor="w").grid(row=0, column=0, sticky="w", pady=4)
+        tk.Label(frm, text=pat.id, relief="groove", anchor="w",
+                 font=("Courier", 9), width=16).grid(
+            row=0, column=1, sticky="ew", padx=4, pady=4)
+
+        name_var  = tk.StringVar(value=pat.name)
+        regex_var = tk.StringVar(value=pat.key_regex)
+        desc_var  = tk.StringVar(value=pat.description)
+
+        for row, (label, var, w) in enumerate(
+            (("名前",     name_var,  28),
+             ("正規表現", regex_var, 40),
+             ("説明",     desc_var,  40)),
+            start=1,
+        ):
+            tk.Label(frm, text=label, anchor="w").grid(
+                row=row, column=0, sticky="w", pady=4)
+            tk.Entry(frm, textvariable=var, width=w).grid(
+                row=row, column=1, sticky="ew", padx=4, pady=4)
+
+        btn_frm = tk.Frame(frm)
+        btn_frm.grid(row=4, column=0, columnspan=2, pady=(10, 0))
+
+        def do_save() -> None:
+            new_name  = name_var.get().strip()
+            new_regex = regex_var.get().strip()
+            if not new_name:
+                messagebox.showerror("エラー", "名前を入力してください", parent=dlg)
+                return
+            if not new_regex:
+                messagebox.showerror("エラー", "正規表現を入力してください", parent=dlg)
+                return
+            try:
+                from excel_diff.patterns import PatternStore, PatternDef
+                store = PatternStore(cfg.patterns_file())
+                store.add_or_update(PatternDef(
+                    id=pat.id,
+                    name=new_name,
+                    key_regex=new_regex,
+                    description=desc_var.get().strip(),
+                    example_old_dir=pat.example_old_dir,
+                    example_new_dir=pat.example_new_dir,
+                    created_at=pat.created_at,
+                ))
+                store.save()
+                self._log(f"パターン更新: [{pat.id}] {new_name}  regex={new_regex}")
+                self._reload_all()
+                dlg.destroy()
+            except Exception as e:
+                self._log(f"更新エラー: {e}")
+
+        tk.Button(
+            btn_frm, text="保存", command=do_save,
+            bg="#4a9eff", fg="white", font=("", 9, "bold"), width=10,
+        ).pack(side="left", padx=4)
+        tk.Button(
+            btn_frm, text="キャンセル", command=dlg.destroy, width=10,
+        ).pack(side="left", padx=4)
+
+        dlg.wait_window()
+
     def _delete_pattern(self) -> None:
         sel = self._tree_list.selection()
         if not sel:
@@ -639,7 +722,7 @@ class TabPatterns(tk.Frame):
             store._patterns = [p for p in store._patterns if p.id != pat_id]
             store.save()
             self._log(f"パターン削除: {pat_id}")
-            self._refresh_list()
+            self._reload_all()
         except Exception as e:
             self._log(f"削除エラー: {e}")
 
