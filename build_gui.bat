@@ -27,13 +27,7 @@ if errorlevel 1 (
 )
 
 echo ビルド中...
-pyinstaller ^
-    --onefile ^
-    --noconsole ^
-    --name excel-diff-gui ^
-    --collect-all tkinterdnd2 ^
-    --clean ^
-    gui_main.py
+pyinstaller --noconfirm excel-diff-gui.spec
 
 echo.
 if exist "dist\excel-diff-gui.exe" (
