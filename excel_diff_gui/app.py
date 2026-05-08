@@ -6,6 +6,7 @@ from . import settings as cfg
 from .tab_dir_diff import TabDirDiff
 from .tab_file_diff import TabFileDiff
 from .tab_patterns import TabPatterns
+from .tab_sheet_diff import TabSheetDiff
 from .tab_split import TabSplit
 from .widgets import LogArea
 
@@ -63,10 +64,14 @@ class App(_AppBase):
         # タブ④: シート分解
         self._tab_split = TabSplit(nb, self._log)
 
-        nb.add(tab_dir,           text="フォルダ比較（条件設定）")
-        nb.add(tab_patterns,      text="フォルダ比較（ペアリング・比較実行）")
-        nb.add(self._tab_file,    text="ファイル比較")
-        nb.add(self._tab_split,   text="シート分解")
+        # タブ⑤: シート比較
+        self._tab_sheet_cmp = TabSheetDiff(nb, self._log)
+
+        nb.add(tab_dir,              text="フォルダ比較（条件設定）")
+        nb.add(tab_patterns,         text="フォルダ比較（ペアリング・比較実行）")
+        nb.add(self._tab_file,       text="ファイル比較")
+        nb.add(self._tab_split,      text="シート分解")
+        nb.add(self._tab_sheet_cmp,  text="シート比較")
 
         self.protocol("WM_DELETE_WINDOW", self._quit)
 
@@ -75,7 +80,8 @@ class App(_AppBase):
 
     def _quit(self) -> None:
         # 各タブの現在UI値を _data に書き戻してから保存
-        for tab in (self._tab_file, self._tab_dir, self._tab_patterns, self._tab_split):
+        for tab in (self._tab_file, self._tab_dir, self._tab_patterns,
+                    self._tab_split, self._tab_sheet_cmp):
             tab.save_state()
         cfg.save()
         self.destroy()

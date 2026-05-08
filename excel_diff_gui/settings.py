@@ -43,6 +43,18 @@ _DEFAULT: dict[str, Any] = {
         "name_regex": "",
         "output_dir": "",
     },
+    "sheet_compare": {
+        "old_file":      "",
+        "new_file":      "",
+        "old_sheet":     "",
+        "new_sheet":     "",
+        "output_dir":    "",
+        "include_cols":  "",
+        "strikethrough": False,
+        "open_browser":  True,
+        "diff_mode":     "lcs",
+        "key_cols":      "",
+    },
     "split_presets": [
         {"name": "括弧前の名前（例: 売上（Sales）→売上）", "regex": "^([^(（]+)"},
         {"name": "番号プレフィックス除去（例: 01_概要→概要）", "regex": r"^\d+_(.+)"},
