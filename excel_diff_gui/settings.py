@@ -1,10 +1,12 @@
 """gui_settings.json の読み書き。"""
 import json
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 _DEFAULT: dict[str, Any] = {
+    "profiles": [],
     "file_diff": {
         "old_file": "",
         "new_file": "",
@@ -63,6 +65,7 @@ _DEFAULT: dict[str, Any] = {
     ],
 }
 
+
 def _data_dir() -> Path:
     """設定・パターンファイルの保存先ディレクトリ。
     EXE実行時は EXE と同じフォルダ、スクリプト実行時はプロジェクトルート。
@@ -94,6 +97,8 @@ def _migrate(data: dict) -> None:
             old_val = data[tab].pop("sheet")
             data[tab].setdefault("sheet_old", old_val)
             data[tab].setdefault("sheet_new", "")
+    # profiles キーが無い旧バージョンのデータに補完
+    data.setdefault("profiles", [])
 
 
 def _ensure_loaded() -> None:
@@ -149,3 +154,79 @@ def get_split_presets() -> list:
 def set_split_presets(presets: list) -> None:
     _ensure_loaded()
     _data["split_presets"] = presets
+
+
+# ── プロファイル（設定セット）管理 ─────────────────────────────────────────
+
+# 同一性チェック時に除外するパス系フィールド（FileSelectRow を使うフィールド）。
+# 新しいパスフィールドをタブに追加したら、ここにも追記すること。
+_PATH_KEYS: dict[str, set[str]] = {
+    "dir_diff":      {"output_dir", "matchers"},
+    "pair_build":    {"old_dir", "new_dir", "pairs_file"},
+    "file_diff":     {"old_file", "new_file", "output", "matchers"},
+    "split":         {"book_file", "output_dir"},
+    "sheet_compare": {"old_file", "new_file", "output_dir"},
+}
+
+
+def get_profiles() -> list[dict]:
+    _ensure_loaded()
+    return _data.get("profiles", [])
+
+
+def save_profile(name: str, note: str, snapshot: dict) -> str:
+    """名前・メモ・スナップショットを持つプロファイルを保存し id を返す。"""
+    _ensure_loaded()
+    now = datetime.now()
+    profile_id = now.strftime("%Y%m%d_%H%M%S")
+    _data.setdefault("profiles", []).append({
+        "id":         profile_id,
+        "name":       name,
+        "note":       note,
+        "created_at": now.isoformat(timespec="seconds"),
+        "snapshot":   snapshot,
+    })
+    return profile_id
+
+
+def update_profile(
+    profile_id: str,
+    name: Optional[str] = None,
+    note: Optional[str] = None,
+) -> None:
+    """既存プロファイルの名前・メモを更新する。"""
+    _ensure_loaded()
+    for p in _data.get("profiles", []):
+        if p["id"] == profile_id:
+            if name is not None:
+                p["name"] = name
+            if note is not None:
+                p["note"] = note
+            return
+
+
+def delete_profile(profile_id: str) -> None:
+    """指定 id のプロファイルを削除する。"""
+    _ensure_loaded()
+    _data["profiles"] = [
+        p for p in _data.get("profiles", []) if p["id"] != profile_id
+    ]
+
+
+def build_identity_snapshot(snapshot: dict) -> dict:
+    """パスフィールドを除いた同一性チェック用スナップショットを返す。"""
+    result = {}
+    for tab, vals in snapshot.items():
+        exclude = _PATH_KEYS.get(tab, set())
+        result[tab] = {k: v for k, v in vals.items() if k not in exclude}
+    return result
+
+
+def find_matching_profile(snapshot: dict) -> Optional[dict]:
+    """現在のスナップショット（パス除外後）と一致するプロファイルを返す。"""
+    _ensure_loaded()
+    identity = build_identity_snapshot(snapshot)
+    for p in _data.get("profiles", []):
+        if build_identity_snapshot(p.get("snapshot", {})) == identity:
+            return p
+    return None

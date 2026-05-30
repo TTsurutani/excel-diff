@@ -160,9 +160,9 @@ class TabFileDiff(tk.Frame):
 
     # ------------------------------------------------------------------ 状態保存
 
-    def save_state(self) -> None:
-        """現在のUI値を設定に書き戻す（ウィンドウを閉じる前に呼ばれる）。"""
-        cfg.set_tab("file_diff", {
+    def get_snapshot(self) -> dict:
+        """現在の UI 値をすべて dict で返す（プロファイル保存用）。"""
+        return {
             "old_file":      self._old.get(),
             "new_file":      self._new.get(),
             "output":        self._out.get(),
@@ -174,7 +174,33 @@ class TabFileDiff(tk.Frame):
             "open_browser":  self._open_br.get(),
             "diff_mode":     self._mode.get(),
             "key_cols":      self._key_cols.get(),
-        })
+        }
+
+    def load_from_snapshot(self, snap: dict) -> None:
+        """スナップショットの値を各変数に反映する（プロファイル読み込み用）。"""
+        mapping = {
+            "old_file":   self._old,
+            "new_file":   self._new,
+            "output":     self._out,
+            "sheet_old":  self._sheet_old,
+            "sheet_new":  self._sheet_new,
+            "include_cols": self._cols,
+            "matchers":   self._matchers,
+            "key_cols":   self._key_cols,
+            "diff_mode":  self._mode,
+        }
+        for key, var in mapping.items():
+            if key in snap:
+                var.set(snap[key])
+        if "strikethrough" in snap:
+            self._strike.set(bool(snap["strikethrough"]))
+        if "open_browser" in snap:
+            self._open_br.set(bool(snap["open_browser"]))
+        self._on_mode()
+
+    def save_state(self) -> None:
+        """現在のUI値を設定に書き戻す（ウィンドウを閉じる前に呼ばれる）。"""
+        cfg.set_tab("file_diff", self.get_snapshot())
 
     # ------------------------------------------------------------------ 実行
 
