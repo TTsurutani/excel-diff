@@ -23,6 +23,7 @@ class TabSheetDiff(tk.Frame):
         self._result_q: "queue.Queue | None" = None
         self._old_load_q: "queue.Queue | None" = None
         self._new_load_q: "queue.Queue | None" = None
+        self._pending_sheets: dict = {}
 
         self._old      = tk.StringVar(value=cfg.get("sheet_compare", "old_file"))
         self._new      = tk.StringVar(value=cfg.get("sheet_compare", "new_file"))
@@ -162,7 +163,9 @@ class TabSheetDiff(tk.Frame):
             else:
                 for name in val:
                     lb.insert("end", name)
-                saved = cfg.get("sheet_compare", f"{side}_sheet", "")
+                # プロファイル読み込み時の pending を優先し、なければ cfg の保存値
+                saved = (self._pending_sheets.pop(side, None)
+                         or cfg.get("sheet_compare", f"{side}_sheet", ""))
                 if saved:
                     items = lb.get(0, "end")
                     if saved in items:
@@ -301,6 +304,47 @@ class TabSheetDiff(tk.Frame):
             webbrowser.open(Path(out_path).resolve().as_uri())
 
     # ------------------------------------------------------------------ 設定保存
+
+    def get_snapshot(self) -> dict:
+        """現在の UI 値をすべて dict で返す（プロファイル保存用）。"""
+        sel_old = self._lb_old.curselection()
+        sel_new = self._lb_new.curselection()
+        return {
+            "old_file":      self._old.get(),
+            "new_file":      self._new.get(),
+            "old_sheet":     self._lb_old.get(sel_old[0]) if sel_old else "",
+            "new_sheet":     self._lb_new.get(sel_new[0]) if sel_new else "",
+            "output_dir":    self._out_dir.get(),
+            "include_cols":  self._cols.get(),
+            "strikethrough": self._strike.get(),
+            "open_browser":  self._open_br.get(),
+            "diff_mode":     self._mode.get(),
+            "key_cols":      self._key_cols.get(),
+        }
+
+    def load_from_snapshot(self, snap: dict) -> None:
+        """スナップショットの値を各変数に反映する（プロファイル読み込み用）。"""
+        # シート選択は非同期ロード完了後に _poll_load が処理するため pending に積む
+        self._pending_sheets = {
+            "old": snap.get("old_sheet", ""),
+            "new": snap.get("new_sheet", ""),
+        }
+        mapping = {
+            "old_file":   self._old,
+            "new_file":   self._new,
+            "output_dir": self._out_dir,
+            "include_cols": self._cols,
+            "key_cols":   self._key_cols,
+            "diff_mode":  self._mode,
+        }
+        for key, var in mapping.items():
+            if key in snap:
+                var.set(snap[key])
+        if "strikethrough" in snap:
+            self._strike.set(bool(snap["strikethrough"]))
+        if "open_browser" in snap:
+            self._open_br.set(bool(snap["open_browser"]))
+        self._on_mode()
 
     def save_state(self) -> None:
         sel_old = self._lb_old.curselection()

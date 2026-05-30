@@ -14,10 +14,16 @@ class TabDirDiff(tk.Frame):
         parent,
         log: Callable[[str], None],
         switch_to_pair_build: Optional[Callable] = None,
+        load_profile_cb: Optional[Callable] = None,
+        get_snapshot_cb: Optional[Callable] = None,
     ) -> None:
         super().__init__(parent)
         self._log = log
         self._switch_to_pair_build = switch_to_pair_build
+        self._load_profile_cb = load_profile_cb
+        self._get_snapshot_cb = get_snapshot_cb
+        self._profile_ids: list = []
+        self._profile_cmb: Optional[ttk.Combobox] = None
 
         self._out_dir   = tk.StringVar(value=cfg.get("dir_diff", "output_dir"))
         self._sheet_old = tk.StringVar(value=cfg.get("dir_diff", "sheet_old"))
@@ -35,6 +41,35 @@ class TabDirDiff(tk.Frame):
 
     def _build(self) -> None:
         pad = {"padx": 6, "pady": 3}
+
+        # ── 設定セット（プロファイル）セレクタ ────────────────────────────
+        grp_prof = tk.LabelFrame(self, text="設定セット")
+        grp_prof.pack(fill="x", **pad)
+
+        prof_row = tk.Frame(grp_prof)
+        prof_row.pack(fill="x", padx=6, pady=4)
+
+        self._profile_cmb = ttk.Combobox(
+            prof_row, state="readonly", width=28,
+        )
+        self._profile_cmb.pack(side="left")
+
+        tk.Button(
+            prof_row, text="読み込み", width=8,
+            command=self._load_profile,
+        ).pack(side="left", padx=(4, 0))
+
+        tk.Button(
+            prof_row, text="現在の設定を保存...", width=16,
+            command=self._save_profile,
+        ).pack(side="left", padx=(8, 0))
+
+        tk.Button(
+            prof_row, text="管理...", width=8,
+            command=self._manage_profiles,
+        ).pack(side="left", padx=(4, 0))
+
+        self.refresh_profile_combobox()
 
         # 差分モード（比較オプションより先に表示）
         grp_mode = tk.LabelFrame(self, text="差分モード")
@@ -110,6 +145,47 @@ class TabDirDiff(tk.Frame):
 
         self._on_mode()
 
+    # ------------------------------------------------------------------ プロファイル操作
+
+    def refresh_profile_combobox(self) -> None:
+        """保存済みプロファイル一覧を Combobox に反映する。"""
+        if self._profile_cmb is None:
+            return
+        profiles = cfg.get_profiles()
+        self._profile_ids = [p["id"] for p in profiles]
+        self._profile_cmb["values"] = [p["name"] for p in profiles]
+        if not profiles:
+            self._profile_cmb.set("")
+
+    def _load_profile(self) -> None:
+        idx = self._profile_cmb.current()
+        if idx < 0:
+            from tkinter import messagebox
+            messagebox.showinfo("情報", "読み込む設定セットを選択してください")
+            return
+        profile_id = self._profile_ids[idx]
+        if self._load_profile_cb:
+            self._load_profile_cb(profile_id)
+
+    def _save_profile(self) -> None:
+        from .profile_dialog import ProfileSaveDialog
+        result = ProfileSaveDialog(self).show()
+        if result and result[0] == "save":
+            _, name, note = result
+            if self._get_snapshot_cb is None:
+                return
+            snap = self._get_snapshot_cb()
+            cfg.save_profile(name, note, snap)
+            cfg.save()
+            self.refresh_profile_combobox()
+            self._log(f"設定セット保存: {name}")
+
+    def _manage_profiles(self) -> None:
+        from .profile_dialog import ProfileManageDialog
+        ProfileManageDialog(
+            self, on_change=self.refresh_profile_combobox,
+        ).show()
+
     def _on_mode(self) -> None:
         state = "normal" if self._mode.get() == "key" else "disabled"
         self._entry_key.config(state=state)
@@ -133,6 +209,30 @@ class TabDirDiff(tk.Frame):
             "diff_mode":     self._mode.get(),
             "key_cols":      self._key_cols.get().strip(),
         }
+
+    def get_snapshot(self) -> dict:
+        """現在の UI 値をすべて dict で返す（プロファイル保存用）。"""
+        return self.get_compare_options()
+
+    def load_from_snapshot(self, snap: dict) -> None:
+        """スナップショットの値を各変数に反映する（プロファイル読み込み用）。"""
+        mapping = {
+            "output_dir":    self._out_dir,
+            "sheet_old":     self._sheet_old,
+            "sheet_new":     self._sheet_new,
+            "include_cols":  self._cols,
+            "matchers":      self._matchers,
+            "key_cols":      self._key_cols,
+            "diff_mode":     self._mode,
+        }
+        for key, var in mapping.items():
+            if key in snap:
+                var.set(snap[key])
+        if "strikethrough" in snap:
+            self._strike.set(bool(snap["strikethrough"]))
+        if "open_browser" in snap:
+            self._open_br.set(bool(snap["open_browser"]))
+        self._on_mode()
 
     def save_state(self) -> None:
         """現在のUI値を設定に書き戻す（ウィンドウを閉じる前に呼ばれる）。"""

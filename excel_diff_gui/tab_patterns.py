@@ -771,12 +771,30 @@ class TabPatterns(tk.Frame):
 
     # ================================================================== 状態保存
 
-    def save_state(self) -> None:
-        """現在のUI値を設定に書き戻す（ウィンドウを閉じる前に呼ばれる）。"""
-        cfg.set_tab("pair_build", {
+    def get_snapshot(self) -> dict:
+        """現在の UI 値をすべて dict で返す（プロファイル保存用）。"""
+        return {
             "old_dir":       self._old_dir.get(),
             "new_dir":       self._new_dir.get(),
             "pairing":       self._pairing.get(),
             "pairs_file":    self._pairs_f.get(),
             "pattern_regex": self._pat_regex.get(),
-        })
+        }
+
+    def load_from_snapshot(self, snap: dict) -> None:
+        """スナップショットの値を各変数に反映する（プロファイル読み込み用）。"""
+        mapping = {
+            "old_dir":       self._old_dir,
+            "new_dir":       self._new_dir,
+            "pairing":       self._pairing,
+            "pairs_file":    self._pairs_f,
+            "pattern_regex": self._pat_regex,
+        }
+        for key, var in mapping.items():
+            if key in snap:
+                var.set(snap[key])
+        # _pairing の trace が _on_pairing_change を自動発火する
+
+    def save_state(self) -> None:
+        """現在のUI値を設定に書き戻す（ウィンドウを閉じる前に呼ばれる）。"""
+        cfg.set_tab("pair_build", self.get_snapshot())

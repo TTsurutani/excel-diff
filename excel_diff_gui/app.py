@@ -45,7 +45,11 @@ class App(_AppBase):
         paned.add(self._log_area, weight=2)
 
         # タブ①: フォルダ比較（条件設定）
-        tab_dir = TabDirDiff(nb, self._log)  # switch_to_pair_build は後で設定
+        tab_dir = TabDirDiff(
+            nb, self._log,
+            load_profile_cb=self.load_profile,
+            get_snapshot_cb=self._get_current_snapshot,
+        )
         self._tab_dir = tab_dir
 
         # タブ②: フォルダ比較（ペアリング・比較実行）
@@ -78,10 +82,49 @@ class App(_AppBase):
     def _log(self, msg: str) -> None:
         self._log_area.log(msg)
 
+    def _get_current_snapshot(self) -> dict:
+        """全タブの現在値を収集してスナップショット dict を返す。"""
+        return {
+            "dir_diff":      self._tab_dir.get_snapshot(),
+            "pair_build":    self._tab_patterns.get_snapshot(),
+            "file_diff":     self._tab_file.get_snapshot(),
+            "split":         self._tab_split.get_snapshot(),
+            "sheet_compare": self._tab_sheet_cmp.get_snapshot(),
+        }
+
+    def load_profile(self, profile_id: str) -> None:
+        """指定IDのプロファイルを全タブに読み込む。"""
+        profile = next(
+            (p for p in cfg.get_profiles() if p["id"] == profile_id), None
+        )
+        if not profile:
+            return
+        snap = profile.get("snapshot", {})
+        self._tab_dir.load_from_snapshot(snap.get("dir_diff", {}))
+        self._tab_patterns.load_from_snapshot(snap.get("pair_build", {}))
+        self._tab_file.load_from_snapshot(snap.get("file_diff", {}))
+        self._tab_split.load_from_snapshot(snap.get("split", {}))
+        self._tab_sheet_cmp.load_from_snapshot(snap.get("sheet_compare", {}))
+        self._tab_dir.refresh_profile_combobox()
+        self._log(f"設定セット読み込み: {profile['name']}")
+
     def _quit(self) -> None:
         # 各タブの現在UI値を _data に書き戻してから保存
         for tab in (self._tab_file, self._tab_dir, self._tab_patterns,
                     self._tab_split, self._tab_sheet_cmp):
             tab.save_state()
+
+        # 保存済みプロファイルが1件以上あり、かつどれとも一致しなければ問い合わせ
+        if cfg.get_profiles():
+            snap = self._get_current_snapshot()
+            if cfg.find_matching_profile(snap) is None:
+                from .profile_dialog import ProfileSaveDialog
+                result = ProfileSaveDialog(self, on_exit=True).show()
+                if result is None:  # キャンセル → 終了しない
+                    return
+                if result[0] == "save":
+                    _, name, note = result
+                    cfg.save_profile(name, note, snap)
+
         cfg.save()
         self.destroy()

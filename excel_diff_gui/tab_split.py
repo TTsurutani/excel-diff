@@ -300,15 +300,32 @@ class TabSplit(tk.Frame):
 
     # ================================================================== 状態保存
 
-    def save_state(self) -> None:
-        """現在のUI値を設定に書き戻す（ウィンドウを閉じる前に呼ばれる）。"""
-        cfg.set_tab("split", {
+    def get_snapshot(self) -> dict:
+        """現在の UI 値をすべて dict で返す（プロファイル保存用）。"""
+        return {
             "book_file":  self._book.get(),
             "prefix":     self._prefix.get(),
             "suffix":     self._suffix.get(),
             "name_regex": self._nregex.get(),
             "output_dir": self._outdir.get(),
-        })
+        }
+
+    def load_from_snapshot(self, snap: dict) -> None:
+        """スナップショットの値を各変数に反映する（プロファイル読み込み用）。"""
+        mapping = {
+            "book_file":  self._book,
+            "prefix":     self._prefix,
+            "suffix":     self._suffix,
+            "name_regex": self._nregex,
+            "output_dir": self._outdir,
+        }
+        for key, var in mapping.items():
+            if key in snap:
+                var.set(snap[key])
+
+    def save_state(self) -> None:
+        """現在のUI値を設定に書き戻す（ウィンドウを閉じる前に呼ばれる）。"""
+        cfg.set_tab("split", self.get_snapshot())
 
     # ================================================================== 実行
 
