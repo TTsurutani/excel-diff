@@ -337,6 +337,21 @@ _poll_queue
 
 ```json
 {
+  "profiles": [
+    {
+      "id": "20240101_120000",
+      "name": "標準比較セット",
+      "note": "通常のフォルダ比較用",
+      "created_at": "2024-01-01T12:00:00",
+      "snapshot": {
+        "dir_diff": { "...": "全フィールド" },
+        "pair_build": { "...": "全フィールド" },
+        "file_diff": { "...": "全フィールド" },
+        "split": { "...": "全フィールド" },
+        "sheet_compare": { "...": "全フィールド" }
+      }
+    }
+  ],
   "file_diff": {
     "old_file": "",
     "new_file": "",
@@ -351,11 +366,6 @@ _poll_queue
     "key_cols": ""
   },
   "dir_diff": {
-    "old_dir": "",
-    "new_dir": "",
-    "pairing": "exact",
-    "pairs_file": "",
-    "pattern_id": "",
     "output_dir": "",
     "sheet_old": "",
     "sheet_new": "",
@@ -366,15 +376,39 @@ _poll_queue
     "diff_mode": "lcs",
     "key_cols": ""
   },
+  "pair_build": {
+    "old_dir": "",
+    "new_dir": "",
+    "pairing": "exact",
+    "pairs_file": "",
+    "pattern_regex": ""
+  },
   "split": {
     "book_file": "",
     "prefix": "",
     "suffix": "",
     "name_regex": "",
     "output_dir": ""
-  }
+  },
+  "sheet_compare": {
+    "old_file": "",
+    "new_file": "",
+    "old_sheet": "",
+    "new_sheet": "",
+    "output_dir": "",
+    "include_cols": "",
+    "strikethrough": false,
+    "open_browser": true,
+    "diff_mode": "lcs",
+    "key_cols": ""
+  },
+  "split_presets": [
+    { "name": "プリセット名", "regex": "正規表現" }
+  ]
 }
 ```
+
+`profiles` の同一性チェックはフォルダ・ファイルパス系フィールドを除外して比較する（`settings.py` の `_PATH_KEYS` 参照）。
 
 ---
 
@@ -421,3 +455,4 @@ _poll_queue
 | 2026-04-16 | 初版作成（検討セッション結果を反映） |
 |            | キーJOIN差分モード・`--pairs` オプションをリモートからpull後に設計に反映 |
 | 2026-04-18 | タブ③にファイル名変換（`--name-regex`）と名前定義自動クリーンアップを追加 |
+| 2026-05-30 | 設定セット（プロファイル）機能を追加。settings.json 構造に `profiles` キーを反映。タブ①冒頭にセレクタUI追加。終了時の未保存チェックダイアログを追加 |
