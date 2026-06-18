@@ -164,6 +164,203 @@ def _stats_line(delete: int, insert: int, modify: int) -> str:
     return "、".join(parts) if parts else "行変更なし"
 
 
+def _write_index_xlsx(
+    results: list,
+    unmatched: list,
+    old_dir: str,
+    new_dir: str,
+    out_path: str,
+) -> None:
+    """フォルダ比較のインデックスを ★index.xlsx として書き出す。"""
+    from datetime import datetime
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Side, Border
+    from openpyxl.utils import get_column_letter
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    no_diff = [(pair, fd, op) for pair, fd, op in results if not fd.has_differences]
+    has_diff = [(pair, fd, op) for pair, fd, op in results if fd.has_differences]
+    old_label = Path(old_dir).name or old_dir
+    new_label = Path(new_dir).name or new_dir
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "比較結果"
+
+    # ---- スタイル定数 ----
+    HEADER_FILL  = PatternFill("solid", fgColor="1F3864")
+    HEADER_FONT  = Font(color="FFFFFF", bold=True, size=11)
+    TITLE_FONT   = Font(bold=True, size=13)
+    META_FONT    = Font(size=10, color="57606A")
+    CARD_DIFF    = PatternFill("solid", fgColor="FFEEF0")
+    CARD_NODIFF  = PatternFill("solid", fgColor="E6FFED")
+    CARD_TOTAL   = PatternFill("solid", fgColor="F6F8FA")
+    NUM_DIFF_DEL = Font(color="CF222E", bold=True)
+    NUM_DIFF_INS = Font(color="1A7F37", bold=True)
+    NUM_DIFF_MOD = Font(color="9A6700", bold=True)
+    NUM_DIFF_TOT = Font(bold=True)
+    NODIFF_FONT  = Font(color="8B949E")
+    LINK_FONT    = Font(color="0000CD", underline="single")
+    UNMATCH_FONT = Font(color="57606A", size=11)
+    CENTER = Alignment(horizontal="center", vertical="center")
+    RIGHT  = Alignment(horizontal="right",  vertical="center")
+    LEFT   = Alignment(horizontal="left",   vertical="center")
+    thin   = Side(style="thin", color="D0D7DE")
+    BORDER = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def set_border(cell):
+        cell.border = BORDER
+
+    # ---- タイトル行 ----
+    ws.merge_cells("A1:G1")
+    c = ws["A1"]
+    c.value = "excel-diff 比較結果インデックス"
+    c.font  = TITLE_FONT
+    c.alignment = LEFT
+    ws.row_dimensions[1].height = 22
+
+    ws["A2"].value = f"旧: {old_dir}"
+    ws["A2"].font  = META_FONT
+    ws.merge_cells("A2:G2")
+    ws["A3"].value = f"新: {new_dir}"
+    ws["A3"].font  = META_FONT
+    ws.merge_cells("A3:G3")
+    ws["A4"].value = f"生成: {now}"
+    ws["A4"].font  = META_FONT
+    ws.merge_cells("A4:G4")
+
+    # ---- サマリカード（行6-8, 列A-G を3列に分割） ----
+    ws.row_dimensions[5].height = 8  # spacer
+    card_data = [
+        ("差分あり", len(has_diff), CARD_DIFF,  Font(color="CF222E", bold=True, size=18)),
+        ("差分なし", len(no_diff),  CARD_NODIFF, Font(color="1A7F37", bold=True, size=18)),
+        ("合計",     len(results),  CARD_TOTAL,  Font(bold=True, size=18)),
+    ]
+    col_map = [(1, 2), (3, 5), (6, 7)]  # (開始列, 終了列) ※1始まり
+    for (label, count, fill, num_font), (cs, ce) in zip(card_data, col_map):
+        cs_letter = get_column_letter(cs)
+        ce_letter = get_column_letter(ce)
+        top_ref    = f"{cs_letter}6:{ce_letter}6"
+        bottom_ref = f"{cs_letter}7:{ce_letter}7"
+        ws.merge_cells(top_ref)
+        ws.merge_cells(bottom_ref)
+        num_cell = ws[f"{cs_letter}6"]
+        lbl_cell = ws[f"{cs_letter}7"]
+        num_cell.value = count
+        num_cell.font  = num_font
+        num_cell.fill  = fill
+        num_cell.alignment = CENTER
+        lbl_cell.value = label
+        lbl_cell.font  = Font(size=10)
+        lbl_cell.fill  = fill
+        lbl_cell.alignment = CENTER
+        for r in (6, 7):
+            for col in range(cs, ce + 1):
+                ws.cell(row=r, column=col).fill = fill
+    ws.row_dimensions[6].height = 28
+    ws.row_dimensions[7].height = 18
+    ws.row_dimensions[8].height = 8  # spacer
+
+    # ---- 注釈 ----
+    ws.merge_cells("A9:G9")
+    note = ws["A9"]
+    note.value = "※ 行数はファイル内の全シートを合算した値です。シート別の内訳は各差分HTMLを参照してください。"
+    note.font  = Font(size=9, color="57606A")
+
+    # ---- テーブルヘッダ ----
+    headers = [old_label, new_label, "削除", "追加", "変更", "合計", "リンク"]
+    for col_idx, hdr in enumerate(headers, 1):
+        c = ws.cell(row=10, column=col_idx, value=hdr)
+        c.font      = HEADER_FONT
+        c.fill      = HEADER_FILL
+        c.alignment = RIGHT if col_idx >= 3 else LEFT
+        set_border(c)
+    ws.row_dimensions[10].height = 18
+
+    # ---- データ行 ----
+    data_row = 11
+    for pair, file_diff, out_file in has_diff:
+        delete, insert, modify = _diff_stats(file_diff)
+        total_changes = delete + insert + modify
+        rel = Path(out_file).name
+        cells_vals = [
+            (pair.old_name, LEFT,  None),
+            (pair.new_name, LEFT,  None),
+            (delete,        RIGHT, NUM_DIFF_DEL),
+            (insert,        RIGHT, NUM_DIFF_INS),
+            (modify,        RIGHT, NUM_DIFF_MOD),
+            (total_changes, RIGHT, NUM_DIFF_TOT),
+            ("開く",        CENTER, LINK_FONT),
+        ]
+        for col_idx, (val, align, fnt) in enumerate(cells_vals, 1):
+            c = ws.cell(row=data_row, column=col_idx, value=val)
+            c.alignment = align
+            if fnt:
+                c.font = fnt
+            set_border(c)
+        # ハイパーリンク
+        link_cell = ws.cell(row=data_row, column=7)
+        link_cell.hyperlink = rel
+        link_cell.font = LINK_FONT
+        ws.row_dimensions[data_row].height = 16
+        data_row += 1
+
+    for pair, file_diff, out_file in no_diff:
+        rel = Path(out_file).name
+        cells_vals = [
+            (pair.old_name, LEFT,   NODIFF_FONT),
+            (pair.new_name, LEFT,   NODIFF_FONT),
+            ("−",           CENTER, NODIFF_FONT),
+            ("−",           CENTER, NODIFF_FONT),
+            ("−",           CENTER, NODIFF_FONT),
+            ("−",           CENTER, NODIFF_FONT),
+            ("開く",        CENTER, LINK_FONT),
+        ]
+        for col_idx, (val, align, fnt) in enumerate(cells_vals, 1):
+            c = ws.cell(row=data_row, column=col_idx, value=val)
+            c.alignment = align
+            if fnt:
+                c.font = fnt
+            set_border(c)
+        link_cell = ws.cell(row=data_row, column=7)
+        link_cell.hyperlink = rel
+        link_cell.font = LINK_FONT
+        ws.row_dimensions[data_row].height = 16
+        data_row += 1
+
+    # ---- 比較対象外 ----
+    if unmatched:
+        data_row += 1
+        ws.merge_cells(f"A{data_row}:G{data_row}")
+        h = ws[f"A{data_row}"]
+        h.value = "比較対象外"
+        h.font  = Font(bold=True, size=11)
+        data_row += 1
+        for p in unmatched:
+            if p.old_name and not p.new_name:
+                label = f"[旧のみ] {p.old_name}"
+            elif p.new_name and not p.old_name:
+                label = f"[新のみ] {p.new_name}"
+            else:
+                continue
+            ws.merge_cells(f"A{data_row}:G{data_row}")
+            c = ws[f"A{data_row}"]
+            c.value = label
+            c.font  = UNMATCH_FONT
+            data_row += 1
+
+    # ---- 列幅 ----
+    col_widths = [40, 40, 8, 8, 8, 8, 10]
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    # ---- ウィンドウ固定（ヘッダ行） ----
+    ws.freeze_panes = "A11"
+
+    wb.save(out_path)
+
+
 def _render_index_html(
     results: list,
     unmatched: list,
@@ -762,6 +959,12 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
     with open(index_path, "w", encoding="utf-8") as f:
         f.write(_render_index_html(results, unmatched, old_dir, new_dir))
     print(f"\nインデックス → {index_path}")
+
+    # インデックスXLSXを生成
+    index_xlsx_path = os.path.join(out_dir, "★index.xlsx")
+    _write_index_xlsx(results, unmatched, old_dir, new_dir, index_xlsx_path)
+    print(f"インデックス → {index_xlsx_path}")
+
     if args.open:
         webbrowser.open(Path(index_path).resolve().as_uri())
 

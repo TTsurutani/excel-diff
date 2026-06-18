@@ -546,7 +546,7 @@ class TabPatterns(tk.Frame):
         from excel_diff.diff_engine import diff_files
         from excel_diff.html_renderer import render
         from excel_diff.matcher import DiffConfig, parse_col_spec, parse_col_list, load_config
-        from excel_diff.__main__ import _render_index_html
+        from excel_diff.__main__ import _render_index_html, _write_index_xlsx
 
         sheet_old_pat  = options.get("sheet_old") or None
         sheet_new_pat  = options.get("sheet_new") or None
@@ -635,6 +635,8 @@ class TabPatterns(tk.Frame):
         Path(index_path).write_text(
             _render_index_html(results, unmatched, old_dir, new_dir), encoding="utf-8",
         )
+        index_xlsx_path = os.path.join(out_dir, "★index.xlsx")
+        _write_index_xlsx(results, unmatched, old_dir, new_dir, index_xlsx_path)
         return index_path, skipped
 
     def _poll_compare(self) -> None:
