@@ -27,6 +27,7 @@ class FilePair:
     new_name: Optional[str]
     score: float
     matched_by: str  # 'exact' | 'pattern' | 'auto' | 'unmatched_old' | 'unmatched_new'
+    key: Optional[str] = None  # capture group 1 (pattern pairing only)
 
 
 @dataclass
@@ -112,8 +113,11 @@ def discover_pairs(
 
 def save_pairs(pairs: list[FilePair], path: str) -> None:
     data = [
-        {"old_name": p.old_name, "new_name": p.new_name,
-         "score": p.score, "matched_by": p.matched_by}
+        {
+            "old_name": p.old_name, "new_name": p.new_name,
+            "score": p.score, "matched_by": p.matched_by,
+            "key": p.key,
+        }
         for p in pairs
     ]
     with open(path, "w", encoding="utf-8") as f:
@@ -314,7 +318,7 @@ def apply_pattern(old_dir: str, new_dir: str, key_regex: str) -> list[FilePair]:
         if key in new_keyed:
             pairs.append(FilePair(
                 old_name=old_f, new_name=new_keyed[key],
-                score=1.0, matched_by="pattern",
+                score=1.0, matched_by="pattern", key=key,
             ))
             used_new_keys.add(key)
         else:

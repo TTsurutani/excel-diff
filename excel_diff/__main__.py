@@ -215,7 +215,7 @@ def _write_index_xlsx(
         cell.border = BORDER
 
     # ---- タイトル行 ----
-    ws.merge_cells("A1:G1")
+    ws.merge_cells("A1:H1")
     c = ws["A1"]
     c.value = "excel-diff 比較結果インデックス"
     c.font  = TITLE_FONT
@@ -224,22 +224,22 @@ def _write_index_xlsx(
 
     ws["A2"].value = f"旧: {old_dir}"
     ws["A2"].font  = META_FONT
-    ws.merge_cells("A2:G2")
+    ws.merge_cells("A2:H2")
     ws["A3"].value = f"新: {new_dir}"
     ws["A3"].font  = META_FONT
-    ws.merge_cells("A3:G3")
+    ws.merge_cells("A3:H3")
     ws["A4"].value = f"生成: {now}"
     ws["A4"].font  = META_FONT
-    ws.merge_cells("A4:G4")
+    ws.merge_cells("A4:H4")
 
-    # ---- サマリカード（行6-8, 列A-G を3列に分割） ----
+    # ---- サマリカード（行6-8, 列A-H を3列に分割） ----
     ws.row_dimensions[5].height = 8  # spacer
     card_data = [
         ("差分あり", len(has_diff), CARD_DIFF,  Font(color="CF222E", bold=True, size=18)),
         ("差分なし", len(no_diff),  CARD_NODIFF, Font(color="1A7F37", bold=True, size=18)),
         ("合計",     len(results),  CARD_TOTAL,  Font(bold=True, size=18)),
     ]
-    col_map = [(1, 2), (3, 5), (6, 7)]  # (開始列, 終了列) ※1始まり
+    col_map = [(1, 3), (4, 6), (7, 8)]  # (開始列, 終了列) ※1始まり
     for (label, count, fill, num_font), (cs, ce) in zip(card_data, col_map):
         cs_letter = get_column_letter(cs)
         ce_letter = get_column_letter(ce)
@@ -265,18 +265,18 @@ def _write_index_xlsx(
     ws.row_dimensions[8].height = 8  # spacer
 
     # ---- 注釈 ----
-    ws.merge_cells("A9:G9")
+    ws.merge_cells("A9:H9")
     note = ws["A9"]
     note.value = "※ 行数はファイル内の全シートを合算した値です。シート別の内訳は各差分HTMLを参照してください。"
     note.font  = Font(size=9, color="57606A")
 
     # ---- テーブルヘッダ ----
-    headers = [old_label, new_label, "削除", "追加", "変更", "合計", "リンク"]
+    headers = ["キー", old_label, new_label, "削除", "追加", "変更", "合計", "リンク"]
     for col_idx, hdr in enumerate(headers, 1):
         c = ws.cell(row=10, column=col_idx, value=hdr)
         c.font      = HEADER_FONT
         c.fill      = HEADER_FILL
-        c.alignment = RIGHT if col_idx >= 3 else LEFT
+        c.alignment = RIGHT if col_idx >= 4 else LEFT
         set_border(c)
     ws.row_dimensions[10].height = 18
 
@@ -287,13 +287,14 @@ def _write_index_xlsx(
         total_changes = delete + insert + modify
         rel = Path(out_file).name
         cells_vals = [
-            (pair.old_name, LEFT,  None),
-            (pair.new_name, LEFT,  None),
-            (delete,        RIGHT, NUM_DIFF_DEL),
-            (insert,        RIGHT, NUM_DIFF_INS),
-            (modify,        RIGHT, NUM_DIFF_MOD),
-            (total_changes, RIGHT, NUM_DIFF_TOT),
-            ("開く",        CENTER, LINK_FONT),
+            (pair.key or "",  LEFT,  None),
+            (pair.old_name,   LEFT,  None),
+            (pair.new_name,   LEFT,  None),
+            (delete,          RIGHT, NUM_DIFF_DEL),
+            (insert,          RIGHT, NUM_DIFF_INS),
+            (modify,          RIGHT, NUM_DIFF_MOD),
+            (total_changes,   RIGHT, NUM_DIFF_TOT),
+            ("開く",          CENTER, LINK_FONT),
         ]
         for col_idx, (val, align, fnt) in enumerate(cells_vals, 1):
             c = ws.cell(row=data_row, column=col_idx, value=val)
@@ -302,7 +303,7 @@ def _write_index_xlsx(
                 c.font = fnt
             set_border(c)
         # ハイパーリンク
-        link_cell = ws.cell(row=data_row, column=7)
+        link_cell = ws.cell(row=data_row, column=8)
         link_cell.hyperlink = rel
         link_cell.font = LINK_FONT
         ws.row_dimensions[data_row].height = 16
@@ -311,13 +312,14 @@ def _write_index_xlsx(
     for pair, file_diff, out_file in no_diff:
         rel = Path(out_file).name
         cells_vals = [
-            (pair.old_name, LEFT,   NODIFF_FONT),
-            (pair.new_name, LEFT,   NODIFF_FONT),
-            ("−",           CENTER, NODIFF_FONT),
-            ("−",           CENTER, NODIFF_FONT),
-            ("−",           CENTER, NODIFF_FONT),
-            ("−",           CENTER, NODIFF_FONT),
-            ("開く",        CENTER, LINK_FONT),
+            (pair.key or "",  LEFT,   NODIFF_FONT),
+            (pair.old_name,   LEFT,   NODIFF_FONT),
+            (pair.new_name,   LEFT,   NODIFF_FONT),
+            ("−",             CENTER, NODIFF_FONT),
+            ("−",             CENTER, NODIFF_FONT),
+            ("−",             CENTER, NODIFF_FONT),
+            ("−",             CENTER, NODIFF_FONT),
+            ("開く",          CENTER, LINK_FONT),
         ]
         for col_idx, (val, align, fnt) in enumerate(cells_vals, 1):
             c = ws.cell(row=data_row, column=col_idx, value=val)
@@ -325,7 +327,7 @@ def _write_index_xlsx(
             if fnt:
                 c.font = fnt
             set_border(c)
-        link_cell = ws.cell(row=data_row, column=7)
+        link_cell = ws.cell(row=data_row, column=8)
         link_cell.hyperlink = rel
         link_cell.font = LINK_FONT
         ws.row_dimensions[data_row].height = 16
@@ -334,7 +336,7 @@ def _write_index_xlsx(
     # ---- 比較対象外 ----
     if unmatched:
         data_row += 1
-        ws.merge_cells(f"A{data_row}:G{data_row}")
+        ws.merge_cells(f"A{data_row}:H{data_row}")
         h = ws[f"A{data_row}"]
         h.value = "比較対象外"
         h.font  = Font(bold=True, size=11)
@@ -346,14 +348,14 @@ def _write_index_xlsx(
                 label = f"[新のみ] {p.new_name}"
             else:
                 continue
-            ws.merge_cells(f"A{data_row}:G{data_row}")
+            ws.merge_cells(f"A{data_row}:H{data_row}")
             c = ws[f"A{data_row}"]
             c.value = label
             c.font  = UNMATCH_FONT
             data_row += 1
 
     # ---- 列幅 ----
-    col_widths = [40, 40, 8, 8, 8, 8, 10]
+    col_widths = [15, 40, 40, 8, 8, 8, 8, 10]
     for i, w in enumerate(col_widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
