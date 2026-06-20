@@ -598,7 +598,7 @@ class TabPatterns(tk.Frame):
             self._log(line)
 
         out_dir = output_dir_opt or generate_output_dir(
-            old_dir, new_dir, base_dir=str(Path(new_dir).parent)
+            old_dir, new_dir, base_dir=str(Path(new_dir).parent / "diff")
         )
         Path(out_dir).mkdir(parents=True, exist_ok=True)
 
