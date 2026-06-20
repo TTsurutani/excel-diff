@@ -36,6 +36,8 @@ import sys
 import webbrowser
 from pathlib import Path
 
+from excel_diff.utils import generate_output_dir
+
 
 # ---------------------------------------------------------------------------
 # 引数パーサ
@@ -879,9 +881,7 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
     if args.output_dir:
         out_dir = args.output_dir
     else:
-        old_name = Path(old_dir).name
-        new_name = Path(new_dir).name
-        out_dir = f"{old_name}_vs_{new_name}"
+        out_dir = generate_output_dir(old_dir, new_dir)
 
     os.makedirs(out_dir, exist_ok=True)
     print(f"出力先: {out_dir}/")

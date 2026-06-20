@@ -142,7 +142,7 @@ excel-diff.exe --split <ブック.xlsx> [--prefix TEXT] [--suffix TEXT] [--name-
 | オプション | 説明 | デフォルト |
 |---|---|---|
 | `-o`, `--output PATH` | 出力HTMLファイルパス | `<新ファイル名>_diff.html` |
-| `--output-dir DIR` | フォルダ比較時の出力先フォルダ | `<旧フォルダ>_vs_<新フォルダ>/` |
+| `--output-dir DIR` | フォルダ比較時の出力先フォルダ | `<旧フォルダ>_vs_<新フォルダ>_YYYYMMDD_HHMMSS/` |
 | `--pairs FILE` | フォルダ比較時に使用するペアJSONファイル（`--discover` で生成） | なし |
 | `--pattern ID` | フォルダ比較時のペアリングパターンID（`--pairs` より低優先） | なし（完全一致） |
 | `--patterns-file FILE` | パターン定義ファイルのパス | `patterns.json` |
