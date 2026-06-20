@@ -633,13 +633,13 @@ class TabPatterns(tk.Frame):
                 self._log(f"  ⚠ スキップ ({pair.old_name}): {e}")
                 skipped.append(pair.old_name)
 
-        index_path = os.path.join(out_dir, "★index.html")
-        Path(index_path).write_text(
-            _render_index_html(results, unmatched, old_dir, new_dir), encoding="utf-8",
-        )
+        # index_path = os.path.join(out_dir, "★index.html")
+        # Path(index_path).write_text(
+        #     _render_index_html(results, unmatched, old_dir, new_dir), encoding="utf-8",
+        # )
         index_xlsx_path = os.path.join(out_dir, "★index.xlsx")
         _write_index_xlsx(results, unmatched, old_dir, new_dir, index_xlsx_path)
-        return index_path, skipped
+        return index_xlsx_path, skipped
 
     def _poll_compare(self) -> None:
         if self._result_q is None:
@@ -656,7 +656,7 @@ class TabPatterns(tk.Frame):
                         self._log(f"  ⚠ スキップ: {name}（無効な xlsx）")
                 self._log(f"比較完了 → {index_path}")
                 if self._compare_open_browser:
-                    webbrowser.open(Path(index_path).resolve().as_uri())
+                    os.startfile(index_path)
         except queue.Empty:
             self.after(100, self._poll_compare)
 

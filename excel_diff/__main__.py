@@ -955,10 +955,10 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
                 print(f"  [新のみ] {p.new_name}")
 
     # インデックスHTMLを生成
-    index_path = os.path.join(out_dir, "★index.html")
-    with open(index_path, "w", encoding="utf-8") as f:
-        f.write(_render_index_html(results, unmatched, old_dir, new_dir))
-    print(f"\nインデックス → {index_path}")
+    # index_path = os.path.join(out_dir, "★index.html")
+    # with open(index_path, "w", encoding="utf-8") as f:
+    #     f.write(_render_index_html(results, unmatched, old_dir, new_dir))
+    # print(f"\nインデックス → {index_path}")
 
     # インデックスXLSXを生成
     index_xlsx_path = os.path.join(out_dir, "★index.xlsx")
@@ -966,7 +966,7 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
     print(f"インデックス → {index_xlsx_path}")
 
     if args.open:
-        webbrowser.open(Path(index_path).resolve().as_uri())
+        os.startfile(index_xlsx_path)
 
 
 # ---------------------------------------------------------------------------
