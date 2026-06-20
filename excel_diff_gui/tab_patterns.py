@@ -7,6 +7,8 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable, Optional
 
+from excel_diff.utils import generate_output_dir
+
 from . import settings as cfg
 from .widgets import FileSelectRow
 from .worker import get_worker
@@ -595,9 +597,9 @@ class TabPatterns(tk.Frame):
         for line in log_lines:
             self._log(line)
 
-        old_name = Path(old_dir).name
-        new_name = Path(new_dir).name
-        out_dir = output_dir_opt or str(Path(new_dir).parent / f"{old_name}_vs_{new_name}")
+        out_dir = output_dir_opt or generate_output_dir(
+            old_dir, new_dir, base_dir=str(Path(new_dir).parent)
+        )
         Path(out_dir).mkdir(parents=True, exist_ok=True)
 
         results = []

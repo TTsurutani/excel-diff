@@ -63,7 +63,7 @@ excel-diff-gui.exe
 |---|---|
 | 差分モード | LCS（行順比較）またはキーJOIN（キー列で対応付け） |
 | キー列 | キーJOINモード時のキー列（例: `C` / `B,C`） |
-| 出力フォルダ | 省略時は `<旧フォルダ名>_vs_<新フォルダ名>/` |
+| 出力フォルダ | 省略時は `<旧フォルダ名>_vs_<新フォルダ名>_YYYYMMDD_HHMMSS/` |
 | 比較シート | 省略時は全シートを比較 |
 | 比較列 | 省略時は全列（例: `A:C,E`） |
 | マッチャーJSON | カスタムマッチャー設定ファイル |
@@ -252,7 +252,7 @@ python -m excel_diff --dir old_dir new_dir
 excel-diff.exe --dir old_dir new_dir
 ```
 
-同名ファイルをそれぞれ比較し、`old_dir_vs_new_dir/` フォルダに各ファイルの差分HTMLを出力する。  
+同名ファイルをそれぞれ比較し、`old_dir_vs_new_dir_YYYYMMDD_HHMMSS/` フォルダに各ファイルの差分HTMLを出力する。  
 比較完了後、同フォルダに **`★index.html`** および **`★index.xlsx`**（比較結果一覧）を自動生成する（`--open` 指定時はブラウザで HTML を開く）。
 
 ```bat
