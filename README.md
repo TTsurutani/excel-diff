@@ -253,7 +253,7 @@ excel-diff.exe --dir old_dir new_dir
 ```
 
 同名ファイルをそれぞれ比較し、`old_dir_vs_new_dir_YYYYMMDD_HHMMSS/` フォルダに各ファイルの差分HTMLを出力する。  
-比較完了後、同フォルダに **`★index.xlsx`**（比較結果一覧）を自動生成する（`--open` 指定時はExcelで開く）。
+比較完了後、同フォルダに **`★index.xlsx`**（比較結果一覧）を自動生成し、Excelで自動的に開く（`--no-open` で抑制可）。
 
 ```bat
 :: 出力先フォルダを指定する
@@ -401,14 +401,14 @@ excel-diff.exe old.xlsx new.xlsx --key-cols B,C
 | `--include-cols SPEC` | 比較対象列を指定（例: `A:C,E`） |
 | `--key-cols SPEC` | キーJOIN差分モードのキー列（例: `C` / `B,C`）。指定するとキーモードが有効になる |
 | `--diff-mode MODE` | 差分モード: `lcs`（デフォルト）または `key` |
-| `--open` | 生成後にブラウザで自動オープン |
+| `--open` / `--no-open` | 生成後にブラウザ（またはExcel）で自動オープン（デフォルト: ON） |
 
 ### ペアリングパターン管理
 
 | オプション | 説明 |
 |---|---|
 | `--discover OLD NEW` | ファイルペア候補を探索してJSONに保存 |
-| `--threshold SCORE` | `--discover` の類似度しきい値（0〜1、デフォルト: 0.6） |
+| `--threshold SCORE` | `--discover` の類似度しきい値（0〜1、デフォルト: 0.3） |
 | `--gen-pattern FILE` | 確認済みペアJSONからパターンを生成・保存 |
 | `--id ID` | `--gen-pattern`: パターンID |
 | `--name NAME` | `--gen-pattern`: パターン名 |

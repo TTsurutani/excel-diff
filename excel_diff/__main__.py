@@ -76,8 +76,8 @@ def _build_parser() -> argparse.ArgumentParser:
     # --- ペア探索 ---
     p.add_argument("--discover", nargs=2, metavar=("OLD_DIR", "NEW_DIR"),
                    help="ファイルペア候補を探索してJSONに保存")
-    p.add_argument("--threshold", type=float, default=0.6, metavar="SCORE",
-                   help="--discover の類似度しきい値 (0.0〜1.0, デフォルト: 0.6)")
+    p.add_argument("--threshold", type=float, default=0.3, metavar="SCORE",
+                   help="--discover の類似度しきい値 (0.0〜1.0, デフォルト: 0.3)")
 
     # --- パターン生成 ---
     p.add_argument("--gen-pattern", metavar="PAIRS_JSON",
@@ -130,8 +130,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="カスタムマッチャー設定JSONファイル")
     p.add_argument("--include-cols", metavar="SPEC",
                    help="比較対象列（例: A:C,E）。省略時は全列比較")
-    p.add_argument("--open", action="store_true",
-                   help="生成後にブラウザで自動オープン")
+    p.add_argument("--open", dest="open", action="store_true", default=True,
+                   help="生成後にブラウザで自動オープン（デフォルト: ON）")
+    p.add_argument("--no-open", dest="open", action="store_false",
+                   help="生成後にブラウザを自動オープンしない")
     p.add_argument("--key-cols", metavar="SPEC",
                    help="キーJOIN差分モードのキー列（例: B,C）。指定するだけで key モードが有効になる")
     p.add_argument("--diff-mode", choices=["lcs", "key"], default=None,
