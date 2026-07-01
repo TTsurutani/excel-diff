@@ -2,6 +2,9 @@
 import tkinter as tk
 from tkinter import ttk
 
+# 強制シャットダウン等で正常終了できない場合に備えた定期autosaveの間隔
+_AUTOSAVE_INTERVAL_MS = 30_000
+
 from . import settings as cfg
 from .tab_dir_diff import TabDirDiff
 from .tab_file_diff import TabFileDiff
@@ -78,6 +81,7 @@ class App(_AppBase):
         nb.add(self._tab_sheet_cmp,  text="シート比較")
 
         self.protocol("WM_DELETE_WINDOW", self._quit)
+        self.after(_AUTOSAVE_INTERVAL_MS, self._autosave)
 
     def _log(self, msg: str) -> None:
         self._log_area.log(msg)
@@ -108,11 +112,26 @@ class App(_AppBase):
         self._tab_dir.refresh_profile_combobox()
         self._log(f"設定セット読み込み: {profile['name']}")
 
-    def _quit(self) -> None:
-        # 各タブの現在UI値を _data に書き戻してから保存
+    def _save_all_tab_states(self) -> None:
+        """各タブの現在UI値を _data に書き戻す。"""
         for tab in (self._tab_file, self._tab_dir, self._tab_patterns,
                     self._tab_split, self._tab_sheet_cmp):
             tab.save_state()
+
+    def _autosave(self) -> None:
+        """強制シャットダウン等で _quit() を経由せず終了した場合の保険として
+        定期的に gui_settings.json へ保存する（プロファイルの問い合わせは行わない）。"""
+        try:
+            self._save_all_tab_states()
+            cfg.save()
+        except Exception:
+            pass
+        finally:
+            self.after(_AUTOSAVE_INTERVAL_MS, self._autosave)
+
+    def _quit(self) -> None:
+        # 各タブの現在UI値を _data に書き戻してから保存
+        self._save_all_tab_states()
 
         # 保存済みプロファイルが1件以上あり、かつどれとも一致しなければ問い合わせ
         if cfg.get_profiles():
