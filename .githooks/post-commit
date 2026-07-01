@@ -1,0 +1,23 @@
+#!/bin/sh
+# コミット後に excel-diff.exe / excel-diff-gui.exe を自動ビルドする
+# .py ファイルの変更を含むコミットのみビルドを実行する
+
+CHANGED=$(git diff-tree --no-commit-id -r --name-only HEAD)
+
+if echo "$CHANGED" | grep -qE '\.py$'; then
+    echo ""
+    echo "[post-commit] .py の変更を検出 — EXE をバックグラウンドビルドします..."
+    REPO_ROOT="$(git rev-parse --show-toplevel)"
+    # cmd.exe の start/ネスト引用符経由だとパスに括弧・非ASCII文字（例: ユーザー名の "(鶴"）が
+    # 含まれる環境で引用符解釈が壊れて起動に失敗するため、bash 自身のバックグラウンド実行に統一する。
+    (
+        cd "$REPO_ROOT" || exit 1
+        "$REPO_ROOT/.venv/Scripts/python.exe" -m PyInstaller --onefile --name excel-diff --clean main.py > build.log 2>&1
+        "$REPO_ROOT/.venv/Scripts/python.exe" -m PyInstaller --noconfirm excel-diff-gui.spec >> build.log 2>&1
+        echo "[build] 完了" >> build.log
+    ) &
+    disown
+    echo "[post-commit] ビルドをバックグラウンドで開始しました (build.log を確認)"
+else
+    echo "[post-commit] Python ファイルの変更なし — ビルドをスキップします"
+fi

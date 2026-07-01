@@ -12,6 +12,7 @@ venv/
 build/
 dist/
 *.spec
+build.log
 
 # テストデータ（生成物）
 tests/fixtures/

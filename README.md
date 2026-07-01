@@ -11,9 +11,11 @@ ExcelファイルをWinMerge風にdiffするCLIツール＋GUIアプリ。
 git clone https://github.com/TTsurutani/excel-diff.git
 cd excel-diff
 setup.bat
+git config core.hooksPath .githooks
 ```
 
-`setup.bat` が仮想環境の作成・依存インストール・テストデータ生成を一括で行う。
+`setup.bat` が仮想環境の作成・依存インストール・テストデータ生成を一括で行う。  
+`git config core.hooksPath .githooks` により、`.py` 変更時に EXE をバックグラウンド自動ビルドする `post-commit` フックが有効になる（`.githooks/` 配下でバージョン管理）。
 
 ---
 
