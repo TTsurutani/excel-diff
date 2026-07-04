@@ -68,11 +68,21 @@ _DEFAULT: dict[str, Any] = {
 
 def _data_dir() -> Path:
     """設定・パターンファイルの保存先ディレクトリ。
-    EXE実行時は EXE と同じフォルダ、スクリプト実行時はプロジェクトルート。
+
+    EXE実行時（frozen）は「exeの一つ上のフォルダ」（dist/の親＝プロジェクト
+    ルート）に既存のソースツリー（excel_diff パッケージ）があればそちらを
+    使う。dist/ を直接の保存先にすると dist/ の再ビルドでデータが失われる
+    ため、Preprocessing-Tools と同様プロジェクトルート側を優先する。
+    該当しない場合（exe単体を持ち出した場合等）は exe と同じフォルダを使う。
+    スクリプト実行時はプロジェクトルート。
     """
     import sys
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
+        exe_dir = Path(sys.executable).parent
+        project_root = exe_dir.parent
+        if (project_root / "excel_diff").is_dir():
+            return project_root
+        return exe_dir
     return Path(__file__).parent.parent
 
 
