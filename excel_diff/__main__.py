@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tomllib
 import webbrowser
 from pathlib import Path
 
@@ -138,6 +139,11 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="キーJOIN差分モードのキー列（例: B,C）。指定するだけで key モードが有効になる")
     p.add_argument("--diff-mode", choices=["lcs", "key"], default=None,
                    help="差分モード: lcs（出現順LCS、デフォルト）または key（キーJOIN）")
+
+    # --- 設定セット（プロファイル）参照 ---
+    p.add_argument("--profile", metavar="NAME",
+                   help="GUIで保存した設定セット名（profiles/<NAME>.toml）を読み込み、"
+                        "コマンドラインで明示指定されていないオプションのデフォルト値として適用する")
     return p
 
 
@@ -974,12 +980,144 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 設定セット（プロファイル）
+# ---------------------------------------------------------------------------
+
+# 実行モードごとに、プロファイルのタブ内キー → argparse の dest 名の対応。
+# ここに載っていないキー（GUI専用のタブ・フィールド）は無視される。
+_PROFILE_FIELD_MAP: dict[str, dict[str, str]] = {
+    "dir_diff": {
+        "output_dir":    "output_dir",
+        "sheet_old":     "sheet_old",
+        "sheet_new":     "sheet_new",
+        "include_cols":  "include_cols",
+        "matchers":      "matchers",
+        "strikethrough": "strikethrough",
+        "open_browser":  "open",
+        "diff_mode":     "diff_mode",
+        "key_cols":      "key_cols",
+    },
+    "file_diff": {
+        "output":        "output",
+        "sheet_old":     "sheet_old",
+        "sheet_new":     "sheet_new",
+        "include_cols":  "include_cols",
+        "matchers":      "matchers",
+        "strikethrough": "strikethrough",
+        "open_browser":  "open",
+        "diff_mode":     "diff_mode",
+        "key_cols":      "key_cols",
+    },
+    "split": {
+        "prefix":       "prefix",
+        "suffix":       "suffix",
+        "name_regex":   "name_regex",
+        "output_dir":   "output_dir",
+    },
+}
+
+# dest 名 → その値をコマンドラインで明示指定する際に使われるフラグ一覧
+# （プロファイル値で上書きしてよいかの判定に使用）。
+_DEST_FLAGS: dict[str, list[str]] = {
+    "output_dir":    ["--output-dir"],
+    "sheet_old":     ["--sheet-old"],
+    "sheet_new":     ["--sheet-new"],
+    "include_cols":  ["--include-cols"],
+    "matchers":      ["--matchers"],
+    "strikethrough": ["--strikethrough"],
+    "open":          ["--open", "--no-open"],
+    "diff_mode":     ["--diff-mode"],
+    "key_cols":      ["--key-cols"],
+    "output":        ["-o", "--output"],
+    "prefix":        ["--prefix"],
+    "suffix":        ["--suffix"],
+    "name_regex":    ["--name-regex"],
+}
+
+
+def _was_provided(dest: str) -> bool:
+    """dest に対応するフラグがコマンドラインで明示的に指定されていれば True。"""
+    flags = _DEST_FLAGS.get(dest, [])
+    argv = sys.argv[1:]
+    return any(
+        tok in flags or any(tok.startswith(f + "=") for f in flags)
+        for tok in argv
+    )
+
+
+def _profile_tab_for_args(args: argparse.Namespace) -> str | None:
+    """実行モードに応じて、プロファイルのどのタブを適用すべきか判定する。"""
+    if args.split:
+        return "split"
+    if args.dir:
+        return "dir_diff"
+    if args.old_file and args.new_file:
+        return "file_diff"
+    return None
+
+
+def _profiles_dir() -> Path:
+    """profiles/ の場所。GUI側（excel_diff_gui.settings._data_dir）と同じ規則:
+    exe化時は dist/ の親（プロジェクトルート）を優先し、CWD には依存しない。
+    これにより p-pipeline 等、別ディレクトリから起動する呼び出し元からでも
+    正しく解決できる。
+    """
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).parent
+        project_root = exe_dir.parent
+        if (project_root / "excel_diff").is_dir():
+            return project_root / "profiles"
+        return exe_dir / "profiles"
+    return Path(__file__).parent.parent / "profiles"
+
+
+def _load_profile_file(name: str) -> dict:
+    path = _profiles_dir() / f"{name}.toml"
+    if not path.is_file():
+        print(f"エラー: 設定セットが見つかりません: {path}", file=sys.stderr)
+        sys.exit(1)
+    with open(path, "rb") as f:
+        return tomllib.load(f)
+
+
+def _apply_profile(args: argparse.Namespace) -> None:
+    """--profile で指定された設定セットを、未指定オプションのデフォルト値として適用する。"""
+    if not args.profile:
+        return
+
+    data = _load_profile_file(args.profile)
+    tab = _profile_tab_for_args(args)
+    if tab is None:
+        print(
+            f"警告: --profile '{args.profile}' はこの実行モードに対応する設定が"
+            f"ないため無視されます"
+        )
+        return
+
+    tab_data = data.get(tab, {})
+    field_map = _PROFILE_FIELD_MAP.get(tab, {})
+    applied = []
+    for profile_key, dest in field_map.items():
+        if profile_key not in tab_data:
+            continue
+        if _was_provided(dest):
+            continue
+        setattr(args, dest, tab_data[profile_key])
+        applied.append(dest)
+
+    if applied:
+        print(f"設定セット「{args.profile}」を適用しました: {', '.join(applied)}")
+
+
+# ---------------------------------------------------------------------------
 # エントリポイント
 # ---------------------------------------------------------------------------
 
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
+
+    _apply_profile(args)
 
     if args.split:
         _run_split(args)
