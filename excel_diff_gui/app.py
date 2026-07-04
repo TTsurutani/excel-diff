@@ -137,13 +137,14 @@ class App(_AppBase):
         if cfg.get_profiles():
             snap = self._get_current_snapshot()
             if cfg.find_matching_profile(snap) is None:
-                from .profile_dialog import ProfileSaveDialog
+                from .profile_dialog import ProfileSaveDialog, save_profile_with_confirm
                 result = ProfileSaveDialog(self, on_exit=True).show()
                 if result is None:  # キャンセル → 終了しない
                     return
                 if result[0] == "save":
                     _, name, note = result
-                    cfg.save_profile(name, note, snap)
+                    if not save_profile_with_confirm(self, name, note, snap):
+                        return
 
         cfg.save()
         self.destroy()

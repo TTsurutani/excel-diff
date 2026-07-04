@@ -25,6 +25,9 @@ tests/index_test/
 *_vs_*/
 gui_settings.json
 
+# 設定セット（ローカルパスを含む個人設定、コミットしない）
+profiles/
+
 # OS
 .DS_Store
 Thumbs.db
