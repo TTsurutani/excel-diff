@@ -168,14 +168,15 @@ class TabDirDiff(tk.Frame):
             self._load_profile_cb(profile_id)
 
     def _save_profile(self) -> None:
-        from .profile_dialog import ProfileSaveDialog
+        from .profile_dialog import ProfileSaveDialog, save_profile_with_confirm
         result = ProfileSaveDialog(self).show()
         if result and result[0] == "save":
             _, name, note = result
             if self._get_snapshot_cb is None:
                 return
             snap = self._get_snapshot_cb()
-            cfg.save_profile(name, note, snap)
+            if not save_profile_with_confirm(self, name, note, snap):
+                return
             cfg.save()
             self.refresh_profile_combobox()
             self._log(f"設定セット保存: {name}")

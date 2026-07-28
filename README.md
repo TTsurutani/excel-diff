@@ -11,9 +11,11 @@ ExcelファイルをWinMerge風にdiffするCLIツール＋GUIアプリ。
 git clone https://github.com/TTsurutani/excel-diff.git
 cd excel-diff
 setup.bat
+git config core.hooksPath .githooks
 ```
 
-`setup.bat` が仮想環境の作成・依存インストール・テストデータ生成を一括で行う。
+`setup.bat` が仮想環境の作成・依存インストール・テストデータ生成を一括で行う。  
+`git config core.hooksPath .githooks` により、`.py` 変更時に EXE をバックグラウンド自動ビルドする `post-commit` フックが有効になる（`.githooks/` 配下でバージョン管理）。
 
 ---
 
@@ -33,7 +35,8 @@ excel-diff-gui.exe
 
 **ファイル・フォルダの入力欄はドラッグ＆ドロップに対応している。** エクスプローラーからファイルやフォルダを直接ドロップして指定できる（従来の「参照」ボタンとの併用可）。
 
-**入力値は自動保存される。** ウィンドウを閉じるとき各タブの入力値が `gui_settings.json` に保存され、次回起動時に復元される。
+**入力値は自動保存される。** ウィンドウを閉じるとき各タブの入力値が `gui_settings.json` に保存され、次回起動時に復元される。  
+また強制シャットダウン等でウィンドウを閉じずにアプリが終了した場合に備え、30秒間隔でも自動保存される。
 
 **設定セット（プロファイル）機能。** よく使う設定の組み合わせに名前を付けて保存し、ワンクリックで全タブの値を復元できる（「設定セット」セクション → 後述）。
 
@@ -253,7 +256,7 @@ excel-diff.exe --dir old_dir new_dir
 ```
 
 同名ファイルをそれぞれ比較し、`old_dir_vs_new_dir_YYYYMMDD_HHMMSS/` フォルダに各ファイルの差分HTMLを出力する。  
-比較完了後、同フォルダに **`★index.xlsx`**（比較結果一覧）を自動生成する（`--open` 指定時はExcelで開く）。
+比較完了後、同フォルダに **`★index.xlsx`**（比較結果一覧）を自動生成し、Excelで自動的に開く（`--no-open` で抑制可）。
 
 ```bat
 :: 出力先フォルダを指定する
@@ -401,14 +404,14 @@ excel-diff.exe old.xlsx new.xlsx --key-cols B,C
 | `--include-cols SPEC` | 比較対象列を指定（例: `A:C,E`） |
 | `--key-cols SPEC` | キーJOIN差分モードのキー列（例: `C` / `B,C`）。指定するとキーモードが有効になる |
 | `--diff-mode MODE` | 差分モード: `lcs`（デフォルト）または `key` |
-| `--open` | 生成後にブラウザで自動オープン |
+| `--open` / `--no-open` | 生成後にブラウザ（またはExcel）で自動オープン（デフォルト: ON） |
 
 ### ペアリングパターン管理
 
 | オプション | 説明 |
 |---|---|
 | `--discover OLD NEW` | ファイルペア候補を探索してJSONに保存 |
-| `--threshold SCORE` | `--discover` の類似度しきい値（0〜1、デフォルト: 0.6） |
+| `--threshold SCORE` | `--discover` の類似度しきい値（0〜1、デフォルト: 0.3） |
 | `--gen-pattern FILE` | 確認済みペアJSONからパターンを生成・保存 |
 | `--id ID` | `--gen-pattern`: パターンID |
 | `--name NAME` | `--gen-pattern`: パターン名 |

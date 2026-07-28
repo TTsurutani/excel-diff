@@ -12,6 +12,7 @@ venv/
 build/
 dist/
 *.spec
+build.log*
 
 # テストデータ（生成物）
 tests/fixtures/
@@ -23,6 +24,9 @@ tests/index_test/
 # ツール出力（フォルダ比較・差分HTML）
 *_vs_*/
 gui_settings.json
+
+# 設定セット（ローカルパスを含む個人設定、コミットしない）
+profiles/
 
 # OS
 .DS_Store

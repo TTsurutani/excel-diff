@@ -71,7 +71,7 @@ excel-diff.exe --dir <旧フォルダ> <新フォルダ> [オプション]
 | `<新ファイル名>_diff.html` | 各ファイルの差分HTML（ペア数ぶん生成） |
 | `★index.xlsx` | 比較結果一覧（サマリカード＋ファイル別差分リンク） |
 
-`★index.xlsx` は `--open` 指定時にExcelで自動的に開かれる。  
+`★index.xlsx` は比較完了後にExcelで自動的に開かれる（`--no-open` で抑制可）。  
 ファイル名先頭の `★` はフォルダ内ソートで一覧ファイルが先頭に来るようにするためのものである。
 
 `★index.xlsx` の列構成: **キー / 旧 / 新 / 削除 / 追加 / 変更 / 合計 / リンク**（8列）。  
@@ -156,14 +156,14 @@ excel-diff.exe --split <ブック.xlsx> [--prefix TEXT] [--suffix TEXT] [--name-
 | `--include-cols SPEC` | 比較対象列の指定（例: `B:U`） | 全列比較 |
 | `--key-cols SPEC` | キーJOIN差分モードのキー列（例: `C` / `B,C`）。指定するとキーモードが有効になる | なし |
 | `--diff-mode MODE` | 差分モード: `lcs` または `key` | `lcs` |
-| `--open` | ファイル比較: 生成HTMLをブラウザで開く。フォルダ比較: ★index.xlsx をExcelで開く | 無効 |
+| `--open` / `--no-open` | ファイル比較: 生成HTMLをブラウザで開く。フォルダ比較: ★index.xlsx をExcelで開く | 有効 |
 
 **ペアリングパターン管理**
 
 | オプション | 説明 |
 |---|---|
 | `--discover OLD NEW` | ファイルペア候補を探索してJSONに保存 |
-| `--threshold SCORE` | `--discover` の類似度しきい値（0〜1） デフォルト: 0.6 |
+| `--threshold SCORE` | `--discover` の類似度しきい値（0〜1） デフォルト: 0.3 |
 | `--gen-pattern FILE` | 確認済みペアJSONからパターンを生成・保存 |
 | `--id ID` | `--gen-pattern`: パターンID |
 | `--name NAME` | `--gen-pattern`: パターン名 |

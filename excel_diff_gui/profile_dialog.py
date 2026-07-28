@@ -6,6 +6,30 @@ from typing import Callable, Optional, Tuple
 from . import settings as cfg
 
 
+def save_profile_with_confirm(
+    parent: tk.Misc, name: str, note: str, snapshot: dict
+) -> bool:
+    """同名のプロファイルが既に存在する場合は上書き確認してから保存する。
+
+    保存した場合は True、キャンセルした場合は False を返す。
+    """
+    try:
+        cfg.save_profile(name, note, snapshot)
+        return True
+    except FileExistsError:
+        if messagebox.askyesno(
+            "上書き確認",
+            f"設定セット「{name}」は既に存在します。上書きしますか？",
+            parent=parent,
+        ):
+            cfg.save_profile(name, note, snapshot, overwrite=True)
+            return True
+        return False
+    except ValueError as e:
+        messagebox.showerror("エラー", str(e), parent=parent)
+        return False
+
+
 class ProfileSaveDialog:
     """プロファイルの名前・メモを入力して保存するダイアログ。
 
