@@ -581,6 +581,16 @@ excel-diff.exe old.xlsx new.xlsx --matchers matchers.json
 
 外部CSVやExcelから対比表を読み込む `mapping_file` タイプもある（詳細は `SPEC.md` 参照）。
 
+「`-`と空白（未入力）を同一視したい」のように、値同士を変換の方向を問わず常に同一視したい場合は `equivalence` タイプを使う。`column` に `"*"` を指定するとシート内の全列に一括適用できる。
+
+```json
+{
+  "matchers": [
+    { "type": "equivalence", "column": "*", "values": ["-", ""] }
+  ]
+}
+```
+
 ---
 
 ## 開発・テスト
