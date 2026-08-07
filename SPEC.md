@@ -424,16 +424,17 @@ excel-diff.exe old.xlsx new.xlsx --include-cols "B:U"
 
 | フィールド | 説明 |
 |---|---|
-| `type` | `"mapping"`（インライン）または `"mapping_file"`（外部ファイル） |
-| `column` | 対象列（Excelの列記号: `"A"`, `"B"` ... または 0始まり整数） |
+| `type` | `"mapping"`（インライン）／`"mapping_file"`（外部ファイル）／`"equivalence"`（値集合の同一視） |
+| `column` | 対象列（Excelの列記号: `"A"`, `"B"` ... または 0始まり整数）。`"*"` を指定するとシート内の全列に一括適用される |
 | `sheet` | 対象シート名（`null` の場合は全シートに適用） |
 | `pairs` | `[旧値, 新値]` のリスト（typeが `mapping` の場合） |
 | `file` | CSVまたはxlsxファイルパス（typeが `mapping_file` の場合） |
 | `old_col` | 対比表の「変換前」列インデックスまたは列名 |
 | `new_col` | 対比表の「変換後」列インデックスまたは列名 |
 | `has_header` | 対比ファイルの1行目がヘッダか（デフォルト: `false`） |
+| `values` | 常に同一視する値のリスト（typeが `equivalence` の場合） |
 
-### 7-3. マッチャーの動作
+### 7-3. マッチャーの動作（mapping / mapping_file）
 
 カスタムマッチャーが設定された列は、ハッシュ計算時に値を「正規化キー」に変換する。
 
@@ -449,10 +450,29 @@ excel-diff.exe old.xlsx new.xlsx --include-cols "B:U"
 
 これによりカスタムマッチャーが行整列（LCS）とセル比較の両方に一貫して効く。
 
-### 7-4. 対応外の値の扱い
+### 7-4. 対応外の値の扱い（mapping / mapping_file）
 
 - 旧値がマッピングのキーに存在しない → 通常比較（差分として扱う）
 - 旧値がマッピングのキーに存在するが、新値が期待値と異なる → 差分として扱う
+
+`mapping` / `mapping_file` は「旧値→新値への変換が完了しているか」を検証する**非対称**な仕組みである点に注意する。値が変化していない行（旧値・新値とも変換前のまま）は「変換されていない」とみなされ、差分として報告される。
+
+### 7-5. equivalence タイプ（値集合の対称な同一視）
+
+「特定の値同士を常に区別しない」という対称な同一視には `equivalence` タイプを使う。`mapping` と異なり変換の完了検証は行わず、`values` に列挙した値はどの組み合わせでも（変化の有無・方向を問わず）差分なしとして扱う。
+
+```json
+{
+  "matchers": [
+    { "type": "equivalence", "column": "*", "values": ["-", ""] }
+  ]
+}
+```
+
+- 列に `"-"` と `""`（未入力セルを含む）が指定した `values` の集合に属する場合、両者を含むあらゆる組み合わせ（`"-"→""`、`""→"-"`、`"-"→"-"`、`""→""` など無変更のケースを含む）が差分なしとなる。
+- `values` に空文字 `""` を含めると、未入力セル（`None`）も自動的に同じグループとして扱われる。
+- `values` の集合に属さない値は通常比較のまま（他の値への変化は差分として報告される）。
+- `column` に `"*"` を指定すると、シート内の全列に一括適用される（列ごとに個別のマッチャーを列挙する必要がない）。
 
 ---
 
@@ -568,7 +588,7 @@ SheetData
   max_col: int             最大列数
 
 ColumnMatcher（抽象）
-  column_idx: int          対象列（0始まり）
+  column_idx: int | "*"    対象列（0始まり、または ALL_COLUMNS="*" で全列）
   sheet: Optional[str]     対象シート名（Noneは全シート）
   matches(old, new) → bool
   normalize_old(val) → Any    LCS用正規化キー（旧ファイル側）
@@ -577,6 +597,10 @@ ColumnMatcher（抽象）
 MappingMatcher（ColumnMatcherの実装）
   forward: dict            {旧値: 新値}
   reverse: dict            {新値: 旧値}（逆引き用）
+
+EquivalenceMatcher（ColumnMatcherの実装）
+  group: set               同一視する値の集合（""を含む場合はNoneも自動追加）
+  matches/normalize_old/normalize_new は対称（旧新の区別なく同じ正規化を適用）
 
 DiffConfig
   matchers: list[ColumnMatcher]

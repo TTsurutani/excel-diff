@@ -38,17 +38,21 @@ from openpyxl.utils import column_index_from_string
 # 正規化キー用センチネル
 # ---------------------------------------------------------------------------
 _MAPPED_SENTINEL = "__excel_diff_mapped__"
+_EQUIV_SENTINEL = "__excel_diff_equiv__"
+
+# column に "*" を指定した場合、シート内の全列に一括適用する
+ALL_COLUMNS = "*"
 
 
 class ColumnMatcher(ABC):
     """特定列のカスタム等値判定の基底クラス。"""
 
-    def __init__(self, column_idx: int, sheet: Optional[str]):
-        self.column_idx = column_idx      # 0始まり
+    def __init__(self, column_idx: Any, sheet: Optional[str]):
+        self.column_idx = column_idx      # 0始まりの整数、または ALL_COLUMNS ("*")
         self.sheet = sheet                # None = 全シートに適用
 
     def applies_to(self, sheet_name: str, col_idx: int) -> bool:
-        if col_idx != self.column_idx:
+        if self.column_idx != ALL_COLUMNS and col_idx != self.column_idx:
             return False
         if self.sheet is not None and self.sheet != sheet_name:
             return False
@@ -104,6 +108,47 @@ class MappingMatcher(ColumnMatcher):
         if val in self.reverse:
             return (_MAPPED_SENTINEL, self.reverse[val])
         return val
+
+
+def _blank(val: Any) -> Any:
+    """空文字列を None に丸める（未入力セルとの表記ゆれを吸収）。"""
+    return None if val == "" else val
+
+
+class EquivalenceMatcher(ColumnMatcher):
+    """
+    指定した値の集合を常に同一とみなす、対称な同一視マッチャー。
+
+    MappingMatcher と異なり「旧値→新値への変換が完了しているか」を
+    検証するものではない。集合に含まれる値同士は、変化の有無や方向に
+    関わらず常に等値として扱う（例: "-" と "" を同一視する）。
+    """
+
+    def __init__(
+        self,
+        column_idx: Any,
+        sheet: Optional[str],
+        values: list[Any],
+    ):
+        super().__init__(column_idx, sheet)
+        group = {_blank(v) for v in values}
+        if None in group:
+            group.add("")  # 空文字/未入力(None)双方を同一グループとして扱う
+        self.group: set[Any] = group
+
+    def _canon(self, val: Any) -> Any:
+        return _EQUIV_SENTINEL if _blank(val) in self.group else _blank(val)
+
+    def matches(self, old_val: Any, new_val: Any) -> bool:
+        return self._canon(old_val) == self._canon(new_val)
+
+    def normalize_old(self, val: Any) -> Any:
+        canon = self._canon(val)
+        return (_EQUIV_SENTINEL, canon) if canon is _EQUIV_SENTINEL else val
+
+    def normalize_new(self, val: Any) -> Any:
+        canon = self._canon(val)
+        return (_EQUIV_SENTINEL, canon) if canon is _EQUIV_SENTINEL else val
 
 
 # ---------------------------------------------------------------------------
@@ -345,12 +390,22 @@ def load_config(config_path: str) -> DiffConfig:
     )
 
 
+def _parse_matcher_column(col_spec: Any) -> Any:
+    """
+    マッチャーの column 指定を解釈する。
+    "*" の場合はシート内の全列に一括適用する ALL_COLUMNS を返す。
+    """
+    if isinstance(col_spec, str) and col_spec.strip() == ALL_COLUMNS:
+        return ALL_COLUMNS
+    return _parse_column(col_spec)
+
+
 def _parse_matchers(entries: list, base_dir: str) -> list[ColumnMatcher]:
     """マッチャーエントリのリストを ColumnMatcher リストに変換する。"""
     matchers: list[ColumnMatcher] = []
 
     for entry in entries:
-        col_idx = _parse_column(entry["column"])
+        col_idx = _parse_matcher_column(entry["column"])
         sheet = entry.get("sheet")
         matcher_type = entry.get("type", "mapping")
 
@@ -371,6 +426,10 @@ def _parse_matchers(entries: list, base_dir: str) -> list[ColumnMatcher]:
                 pairs = _load_pairs_from_csv(file_path, old_col, new_col, has_header, base_dir)
 
             matchers.append(MappingMatcher(col_idx, sheet, pairs))
+
+        elif matcher_type == "equivalence":
+            values = entry["values"]
+            matchers.append(EquivalenceMatcher(col_idx, sheet, values))
 
         else:
             raise ValueError(f"未知のマッチャータイプ: {matcher_type!r}")

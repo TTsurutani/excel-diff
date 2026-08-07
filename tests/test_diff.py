@@ -14,7 +14,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from excel_diff.reader import CellData, RowData, SheetData
 from excel_diff.diff_engine import diff_files, RowTag
-from excel_diff.matcher import MappingMatcher, DiffConfig, parse_col_spec
+from excel_diff.matcher import (
+    MappingMatcher,
+    EquivalenceMatcher,
+    ALL_COLUMNS,
+    DiffConfig,
+    parse_col_spec,
+)
 from excel_diff.html_renderer import _render_cell_pair_diff
 
 
@@ -237,6 +243,65 @@ def t_matcher_sheet_scope():
     statuses = {sd.name: sd.status for sd in result.sheet_diffs}
     assert statuses["対象シート"]   == "equal",    "対象シートがEQUALにならなかった"
     assert statuses["対象外シート"] == "modified", "対象外シートがMODIFIEDにならなかった"
+
+
+# --- カスタムマッチャー: equivalence（"-" と "" を同一視）---
+
+def t_equivalence_hyphen_blank():
+    matcher = EquivalenceMatcher(
+        column_idx=1,
+        sheet=None,
+        values=["-", ""],
+    )
+    result = run_diff(
+        [["名前", "備考"], ["A商事", "-"], ["B商事", ""], ["C商事", "変化なし"]],
+        [["名前", "備考"], ["A商事", ""], ["B商事", "-"], ["C商事", "変化なし"]],
+        matchers=[matcher],
+    )
+    assert not result.has_differences, "「-」と空白の同一視で差分が検出された"
+
+
+def t_equivalence_unchanged_not_flagged():
+    """マッピングと違い、変化していない値まで誤検出しないこと。"""
+    matcher = EquivalenceMatcher(
+        column_idx=1,
+        sheet=None,
+        values=["-", ""],
+    )
+    result = run_diff(
+        [["名前", "備考"], ["A商事", "-"], ["B商事", ""]],
+        [["名前", "備考"], ["A商事", "-"], ["B商事", ""]],  # 完全に無変更
+        matchers=[matcher],
+    )
+    assert not result.has_differences, "無変更の行が誤って差分ありと判定された"
+
+
+def t_equivalence_outside_group_still_diffs():
+    matcher = EquivalenceMatcher(
+        column_idx=1,
+        sheet=None,
+        values=["-", ""],
+    )
+    result = run_diff(
+        [["名前", "備考"], ["A商事", "-"]],
+        [["名前", "備考"], ["A商事", "別の値"]],  # 同一視グループ外への変化
+        matchers=[matcher],
+    )
+    assert result.has_differences, "グループ外への変化が差分なしと判定された"
+
+
+def t_equivalence_all_columns_wildcard():
+    matcher = EquivalenceMatcher(
+        column_idx=ALL_COLUMNS,
+        sheet=None,
+        values=["-", ""],
+    )
+    result = run_diff(
+        [["-", "値A"], ["", "値B"]],
+        [["", "値A"], ["-", "値B"]],  # 全列で "-"/"" が入れ替わっているだけ
+        matchers=[matcher],
+    )
+    assert not result.has_differences, "全列ワイルドカードで差分が検出された"
 
 
 # --- 行番号の正確性 ---
@@ -538,6 +603,10 @@ if __name__ == "__main__":
     _run_test("マッチャー: マッピング外→差分あり",   t_matcher_not_in_mapping)
     _run_test("マッチャー: 一部列のみ一致",           t_matcher_partial)
     _run_test("マッチャー: シートスコープ",           t_matcher_sheet_scope)
+    _run_test("equiv: 「-」と空白を同一視",   t_equivalence_hyphen_blank)
+    _run_test("equiv: 無変更を誤検出しない", t_equivalence_unchanged_not_flagged)
+    _run_test("equiv: グループ外は差分あり", t_equivalence_outside_group_still_diffs)
+    _run_test("equiv: 全列ワイルドカード",   t_equivalence_all_columns_wildcard)
     _run_test("行番号の正確性",                      t_row_numbers)
 
     print()
