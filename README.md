@@ -591,6 +591,20 @@ excel-diff.exe old.xlsx new.xlsx --matchers matchers.json
 }
 ```
 
+列ごとに異なる同一視グループを定義しつつ全列ルールも併用したい場合は、**特定列のルールを `"*"` より前に**書くこと（1列につき配列先頭から最初に該当したマッチャーのみが使われるため）。
+
+```json
+{
+  "matchers": [
+    { "type": "equivalence", "column": "H", "values": ["シンプル", "", "-"] },
+    { "type": "equivalence", "column": "G", "values": ["テキスト", "", "-", "なし"] },
+    { "type": "equivalence", "column": "*", "values": ["-", ""] }
+  ]
+}
+```
+
+詳細な優先順位の仕組みは `SPEC.md` の「7-6. マッチャーの優先順位」を参照。
+
 ---
 
 ## 開発・テスト
