@@ -617,6 +617,7 @@ excel-diff.exe old.xlsx new.xlsx --matchers matchers.json
 - `--sheet-old`/`--sheet-new` の正規表現が複数シートにマッチした場合、常に先頭の1枚のみを採用し、他のマッチシートは警告のみで無条件に無視する（`excel_diff/reader.py:95-114`）
 - シート名が旧新で異なる場合、シート数が同じなら位置で強制ペア（新側の名前を旧側に統一）、異なれば名前一致優先＋残りを出現順で機械的にペアする、という決め打ちロジックがある（`excel_diff/diff_engine.py:441-466`）
 - ペア候補探索のデフォルト類似度閾値が、関数側 `0.6`（`file_pairing.py:57`）とCLI `--threshold` 引数のデフォルト `0.3`（`__main__.py:80-81`）で不一致のままハードコードされている（既知の技術的負債）
+- 型が違う同値（例: 数値`128`と数字文字列`'128'`）は、値が同じでも**差分ありと判定される**（`excel_diff/diff_engine.py:110` は `==` 比較のため型も一致が必要）。CRM自動生成データと手動メンテのExcel原本など、由来の異なる2ファイルを比較する際に発生しやすい（詳細: [Issue #14](https://github.com/TTsurutani/excel-diff/issues/14)）
 
 ---
 
