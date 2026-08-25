@@ -19,6 +19,7 @@ _DEFAULT: dict[str, Any] = {
         "open_browser": True,
         "diff_mode": "lcs",
         "key_cols": "",
+        "sub_key_cols": "",
     },
     "dir_diff": {
         "output_dir": "",
@@ -30,6 +31,7 @@ _DEFAULT: dict[str, Any] = {
         "open_browser": True,
         "diff_mode": "lcs",
         "key_cols": "",
+        "sub_key_cols": "",
     },
     "pair_build": {
         "old_dir": "",
@@ -56,6 +58,7 @@ _DEFAULT: dict[str, Any] = {
         "open_browser":  True,
         "diff_mode":     "lcs",
         "key_cols":      "",
+        "sub_key_cols":  "",
     },
     "split_presets": [
         {"name": "括弧前の名前（例: 売上（Sales）→売上）", "regex": "^([^(（]+)"},

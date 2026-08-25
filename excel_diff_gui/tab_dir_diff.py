@@ -31,6 +31,7 @@ class TabDirDiff(tk.Frame):
         self._cols      = tk.StringVar(value=cfg.get("dir_diff", "include_cols"))
         self._matchers = tk.StringVar(value=cfg.get("dir_diff", "matchers"))
         self._key_cols = tk.StringVar(value=cfg.get("dir_diff", "key_cols"))
+        self._sub_key_cols = tk.StringVar(value=cfg.get("dir_diff", "sub_key_cols"))
         self._strike   = tk.BooleanVar(value=cfg.get("dir_diff", "strikethrough"))
         self._open_br  = tk.BooleanVar(value=cfg.get("dir_diff", "open_browser", True))
         self._mode     = tk.StringVar(value=cfg.get("dir_diff", "diff_mode", "lcs"))
@@ -90,6 +91,16 @@ class TabDirDiff(tk.Frame):
         self._entry_key = tk.Entry(fr_key, textvariable=self._key_cols, width=18)
         self._entry_key.pack(side="left")
         tk.Label(fr_key, text="例: C  または  B,C", fg="gray").pack(side="left", padx=6)
+
+        fr_subkey = tk.Frame(grp_mode)
+        fr_subkey.pack(anchor="w", padx=8, pady=(0, 4))
+        tk.Label(fr_subkey, text="サブキー列", width=8, anchor="e").pack(side="left")
+        self._entry_subkey = tk.Entry(fr_subkey, textvariable=self._sub_key_cols, width=18)
+        self._entry_subkey.pack(side="left", padx=(2, 0))
+        tk.Label(
+            fr_subkey,
+            text="キーで対応が付かなかった行の救済照合。例: D", fg="gray",
+        ).pack(side="left", padx=6)
 
         # 比較オプション
         grp_opt = tk.LabelFrame(self, text="比較オプション")
@@ -190,6 +201,7 @@ class TabDirDiff(tk.Frame):
     def _on_mode(self) -> None:
         state = "normal" if self._mode.get() == "key" else "disabled"
         self._entry_key.config(state=state)
+        self._entry_subkey.config(state=state)
 
     def _go_to_pair_build(self) -> None:
         if self._switch_to_pair_build:
@@ -209,6 +221,7 @@ class TabDirDiff(tk.Frame):
             "open_browser":  self._open_br.get(),
             "diff_mode":     self._mode.get(),
             "key_cols":      self._key_cols.get().strip(),
+            "sub_key_cols":  self._sub_key_cols.get().strip(),
         }
 
     def get_snapshot(self) -> dict:
@@ -224,6 +237,7 @@ class TabDirDiff(tk.Frame):
             "include_cols":  self._cols,
             "matchers":      self._matchers,
             "key_cols":      self._key_cols,
+            "sub_key_cols":  self._sub_key_cols,
             "diff_mode":     self._mode,
         }
         for key, var in mapping.items():

@@ -305,6 +305,10 @@ class DiffConfig:
         キー JOIN モード時の複合キー列（0始まりインデックスのリスト）。
         指定順がキーの構成順に対応する（例: [1, 2] → B列・C列の複合キー）。
         diff_mode が "lcs" のときは無視される。
+    sub_key_cols:
+        主キーで一意に対応付けられなかった行を救済するための、2段目の
+        照合キー（0始まりインデックスのリスト）。key_cols と重複する列は
+        指定できない。
     """
 
     def __init__(
@@ -314,12 +318,36 @@ class DiffConfig:
         sheet_col_filters: Optional[dict[str, set[int]]] = None,
         diff_mode: str = "lcs",
         key_cols: Optional[list[int]] = None,
+        sub_key_cols: Optional[list[int]] = None,
     ):
         self.matchers: list[ColumnMatcher] = matchers or []
         self.global_col_filter: Optional[set[int]] = global_col_filter
         self.sheet_col_filters: dict[str, set[int]] = sheet_col_filters or {}
         self.diff_mode: str = diff_mode          # "lcs" or "key"
         self.key_cols: list[int] = key_cols or []
+        self.sub_key_cols: list[int] = sub_key_cols or []
+        self.validate_subkey_config()
+
+    def validate_subkey_config(self) -> None:
+        """
+        sub_key_cols の設定妥当性を検証する。__init__ から呼ばれるほか、
+        CLI（_build_config）のように属性を後から書き換える経路でも、
+        全属性を確定させた後に明示的に呼び出して検証する。
+        """
+        if self.sub_key_cols:
+            if self.diff_mode != "key":
+                raise ValueError(
+                    "sub_key_cols は diff_mode が 'key' のときのみ指定できます"
+                )
+            if not self.key_cols:
+                raise ValueError(
+                    "sub_key_cols を指定する場合は key_cols も指定してください"
+                )
+            overlap = set(self.key_cols) & set(self.sub_key_cols)
+            if overlap:
+                raise ValueError(
+                    f"key_cols と sub_key_cols に重複する列があります: {sorted(overlap)}"
+                )
 
     def get_col_filter(self, sheet_name: str) -> Optional[set[int]]:
         """シート名に対応する列フィルタを返す（なければ全列）。"""
@@ -371,7 +399,7 @@ def load_config(config_path: str) -> DiffConfig:
         if "include_cols" in sheet_cfg:
             sheet_filters[sheet_name] = parse_col_spec(str(sheet_cfg["include_cols"]))
 
-    # diff_mode / key_cols
+    # diff_mode / key_cols / sub_key_cols
     diff_mode: str = raw.get("diff_mode", "lcs")
     key_cols: list[int] = []
     if "key_cols" in raw:
@@ -381,12 +409,21 @@ def load_config(config_path: str) -> DiffConfig:
         elif isinstance(raw_keys, list):
             key_cols = [_parse_column(c) for c in raw_keys]
 
+    sub_key_cols: list[int] = []
+    if "sub_key_cols" in raw:
+        raw_sub_keys = raw["sub_key_cols"]
+        if isinstance(raw_sub_keys, str):
+            sub_key_cols = parse_col_list(raw_sub_keys)
+        elif isinstance(raw_sub_keys, list):
+            sub_key_cols = [_parse_column(c) for c in raw_sub_keys]
+
     return DiffConfig(
         matchers=matchers,
         global_col_filter=global_filter,
         sheet_col_filters=sheet_filters,
         diff_mode=diff_mode,
         key_cols=key_cols,
+        sub_key_cols=sub_key_cols,
     )
 
 

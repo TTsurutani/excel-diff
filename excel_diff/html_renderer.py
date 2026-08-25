@@ -256,6 +256,8 @@ body {
 .row-modified td         { background: #fff; }
 .row-modified .line-num  { background: #fff5b1; }  /* 行番号だけ色をつけて変更行であることを示す */
 .cell-modified           { background: #fff8c5 !important; }
+/* サブキー救済ペアの旧主キー列（通常のMODIFY黄色とは区別する） */
+.cell-modified-subkey    { background: #e8dcff !important; }
 
 /* 対応のない行（削除/追加の空き側） */
 .row-phantom td         { background: #f0f0f0 !important; }
@@ -300,6 +302,7 @@ body {
 .row-modified .col-frozen { background: #fff; }
 .row-phantom  .col-frozen { background: #f0f0f0; }
 .col-frozen.cell-modified { background: #fff8c5 !important; }
+.col-frozen.cell-modified-subkey { background: #e8dcff !important; }
 .col-frozen.cell-excluded { background: #f8f8f8 !important; }
 """
 
@@ -565,6 +568,7 @@ def _build_tds(
     max_cols: int,
     html_map: dict[int, str],
     col_filter: Optional[set[int]],
+    subkey_highlight_cols: Optional[set[int]] = None,
 ) -> str:
     if row_data is None:
         return "".join(f"<td></td>" for _ in range(max_cols))
@@ -575,7 +579,10 @@ def _build_tds(
         if col_filter is not None and i not in col_filter:
             tds += f'<td class="cell-excluded">{_render_cell_value(cell)}</td>'
         elif i in html_map:
-            tds += f'<td class="cell-modified">{html_map[i]}</td>'
+            if subkey_highlight_cols and i in subkey_highlight_cols:
+                tds += f'<td class="cell-modified-subkey">{html_map[i]}</td>'
+            else:
+                tds += f'<td class="cell-modified">{html_map[i]}</td>'
         else:
             tds += f"<td>{_render_cell_value(cell)}</td>"
     return tds
@@ -586,11 +593,18 @@ def _render_row_pair(
     max_cols: int,
     col_filter: Optional[set[int]] = None,
     row_idx: int = 0,
+    key_cols: Optional[list[int]] = None,
 ) -> tuple[str, str]:
-    """1つの RowDiff から (左パネル用 <tr>, 右パネル用 <tr>) を返す。"""
+    """1つの RowDiff から (左パネル用 <tr>, 右パネル用 <tr>) を返す。
+
+    key_cols はキーJOINモードの主キー列。row_diff がサブキー救済ペア
+    （matched_by == "subkey"）の場合、これらの列のセルには通常の
+    cell-modified とは別の専用クラスを付けて区別する。
+    """
     tag = row_diff.tag
     changed = {cd.col_idx: cd for cd in row_diff.cell_diffs}
     ri = f' data-row="{row_idx}"'
+    subkey_highlight_cols = set(key_cols) if (key_cols and row_diff.matched_by == "subkey") else None
 
     # MODIFY: 文字 diff を事前計算
     char_diffs: dict[int, tuple[str, str]] = {}
@@ -617,8 +631,8 @@ def _render_row_pair(
     else:  # MODIFY
         old_map = {i: v[0] for i, v in char_diffs.items()}
         new_map = {i: v[1] for i, v in char_diffs.items()}
-        tds_l = _build_tds(row_diff.old_row, max_cols, old_map, col_filter)
-        tds_r = _build_tds(row_diff.new_row, max_cols, new_map, col_filter)
+        tds_l = _build_tds(row_diff.old_row, max_cols, old_map, col_filter, subkey_highlight_cols)
+        tds_r = _build_tds(row_diff.new_row, max_cols, new_map, col_filter, subkey_highlight_cols)
         left_tr  = f'<tr class="row-modified"{ri}>{tds_l}</tr>'
         right_tr = f'<tr class="row-modified"{ri}>{tds_r}</tr>'
 
@@ -659,7 +673,7 @@ def _render_sheet(sheet_diff: SheetDiff, old_path: str, new_path: str) -> str:
     left_rows: list[str] = []
     right_rows: list[str] = []
     for i, rd in enumerate(sheet_diff.row_diffs):
-        lt, rt = _render_row_pair(rd, max_cols, col_filter, i)
+        lt, rt = _render_row_pair(rd, max_cols, col_filter, i, sheet_diff.key_cols)
         left_rows.append(lt)
         right_rows.append(rt)
 

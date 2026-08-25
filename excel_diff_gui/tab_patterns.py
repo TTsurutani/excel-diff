@@ -557,6 +557,7 @@ class TabPatterns(tk.Frame):
         matchers_file  = options.get("matchers", "")
         diff_mode      = options.get("diff_mode", "lcs")
         key_cols_str   = options.get("key_cols", "")
+        sub_key_cols_str = options.get("sub_key_cols", "")
         output_dir_opt = options.get("output_dir", "")
 
         if matchers_file and os.path.isfile(matchers_file):
@@ -574,6 +575,14 @@ class TabPatterns(tk.Frame):
         else:
             config.diff_mode = "lcs"
 
+        if sub_key_cols_str:
+            config.sub_key_cols = parse_col_list(sub_key_cols_str)
+            try:
+                config.validate_subkey_config()
+            except ValueError as e:
+                self._log(f"エラー: {e}")
+                return
+
         from openpyxl.utils import get_column_letter as _gcl
         log_lines = ["─" * 36]
         log_lines.append(f"[実行条件] 旧: {old_dir}")
@@ -586,6 +595,9 @@ class TabPatterns(tk.Frame):
         if config.diff_mode == "key" and config.key_cols:
             key_letters = ", ".join(_gcl(c + 1) for c in config.key_cols)
             log_lines.append(f"[実行条件] キー列: {key_letters}")
+        if config.sub_key_cols:
+            sub_letters = ", ".join(_gcl(c + 1) for c in config.sub_key_cols)
+            log_lines.append(f"[実行条件] サブキー列: {sub_letters}")
         log_lines.append(f"[実行条件] 差分モード: {config.diff_mode}")
         sheet_log = []
         if sheet_old_pat:

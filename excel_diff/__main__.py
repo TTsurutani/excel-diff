@@ -137,6 +137,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="生成後にブラウザを自動オープンしない")
     p.add_argument("--key-cols", metavar="SPEC",
                    help="キーJOIN差分モードのキー列（例: B,C）。指定するだけで key モードが有効になる")
+    p.add_argument("--sub-key-cols", metavar="SPEC",
+                   help="主キーで対応が確定しなかった行を救済する2段目のキー列（例: D）。"
+                        "--key-cols（key モード）と併用時のみ有効")
     p.add_argument("--diff-mode", choices=["lcs", "key"], default=None,
                    help="差分モード: lcs（出現順LCS、デフォルト）または key（キーJOIN）")
 
@@ -541,6 +544,9 @@ def _build_config(args: argparse.Namespace):
     if args.diff_mode:
         config.diff_mode = args.diff_mode
 
+    if args.sub_key_cols:
+        config.sub_key_cols = parse_col_list(args.sub_key_cols)
+
     if config.diff_mode == "key":
         if not config.key_cols:
             print("エラー: --diff-mode key を使うには --key-cols でキー列を指定してください", file=sys.stderr)
@@ -548,6 +554,17 @@ def _build_config(args: argparse.Namespace):
         from openpyxl.utils import get_column_letter
         cols_disp = ", ".join(get_column_letter(c + 1) for c in config.key_cols)
         print(f"差分モード: key JOIN  キー列: {cols_disp}")
+
+    try:
+        config.validate_subkey_config()
+    except ValueError as e:
+        print(f"エラー: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if config.sub_key_cols:
+        from openpyxl.utils import get_column_letter
+        sub_disp = ", ".join(get_column_letter(c + 1) for c in config.sub_key_cols)
+        print(f"サブキー列: {sub_disp}")
 
     return config
 
@@ -996,6 +1013,7 @@ _PROFILE_FIELD_MAP: dict[str, dict[str, str]] = {
         "open_browser":  "open",
         "diff_mode":     "diff_mode",
         "key_cols":      "key_cols",
+        "sub_key_cols":  "sub_key_cols",
     },
     "file_diff": {
         "output":        "output",
@@ -1007,6 +1025,7 @@ _PROFILE_FIELD_MAP: dict[str, dict[str, str]] = {
         "open_browser":  "open",
         "diff_mode":     "diff_mode",
         "key_cols":      "key_cols",
+        "sub_key_cols":  "sub_key_cols",
     },
     "split": {
         "prefix":       "prefix",
@@ -1028,6 +1047,7 @@ _DEST_FLAGS: dict[str, list[str]] = {
     "open":          ["--open", "--no-open"],
     "diff_mode":     ["--diff-mode"],
     "key_cols":      ["--key-cols"],
+    "sub_key_cols":  ["--sub-key-cols"],
     "output":        ["-o", "--output"],
     "prefix":        ["--prefix"],
     "suffix":        ["--suffix"],

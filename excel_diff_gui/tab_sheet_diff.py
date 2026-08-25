@@ -30,6 +30,7 @@ class TabSheetDiff(tk.Frame):
         self._out_dir  = tk.StringVar(value=cfg.get("sheet_compare", "output_dir"))
         self._cols     = tk.StringVar(value=cfg.get("sheet_compare", "include_cols"))
         self._key_cols = tk.StringVar(value=cfg.get("sheet_compare", "key_cols"))
+        self._sub_key_cols = tk.StringVar(value=cfg.get("sheet_compare", "sub_key_cols"))
         self._strike   = tk.BooleanVar(value=cfg.get("sheet_compare", "strikethrough"))
         self._open_br  = tk.BooleanVar(value=cfg.get("sheet_compare", "open_browser"))
         self._mode     = tk.StringVar(value=cfg.get("sheet_compare", "diff_mode", "lcs"))
@@ -67,6 +68,17 @@ class TabSheetDiff(tk.Frame):
         self._entry_key = tk.Entry(fr_key, textvariable=self._key_cols, width=14)
         self._entry_key.pack(side="left")
         tk.Label(fr_key, text="（例: B  または  B,C）", foreground="gray").pack(side="left", padx=4)
+
+        fr_subkey = tk.Frame(grp_mode)
+        fr_subkey.grid(row=2, column=0, sticky="w", padx=6, pady=2)
+        tk.Label(fr_subkey, text="サブキー列", width=8, anchor="e").pack(side="left", padx=(28, 2))
+        self._entry_subkey = tk.Entry(fr_subkey, textvariable=self._sub_key_cols, width=14)
+        self._entry_subkey.pack(side="left")
+        tk.Label(
+            fr_subkey,
+            text="（キーで対応が付かなかった行の救済照合。例: D）",
+            foreground="gray",
+        ).pack(side="left", padx=4)
 
         # 比較オプション（旧/新ファイルとシート選択）
         grp_files = tk.LabelFrame(self, text="比較オプション")
@@ -131,6 +143,7 @@ class TabSheetDiff(tk.Frame):
     def _on_mode(self) -> None:
         state = "normal" if self._mode.get() == "key" else "disabled"
         self._entry_key.config(state=state)
+        self._entry_subkey.config(state=state)
 
     # ------------------------------------------------------------------ シート読み込み
 
@@ -213,6 +226,7 @@ class TabSheetDiff(tk.Frame):
             self._strike.get(),
             self._mode.get(),
             self._key_cols.get().strip(),
+            self._sub_key_cols.get().strip(),
             self._open_br.get(),
         )
         self.after(100, self._poll)
@@ -230,7 +244,8 @@ class TabSheetDiff(tk.Frame):
 
     def _do_diff(
         self, old_file, new_file, old_sheet, new_sheet,
-        output_dir, include_cols, strikethrough, diff_mode, key_cols_str, open_browser,
+        output_dir, include_cols, strikethrough, diff_mode, key_cols_str,
+        sub_key_cols_str, open_browser,
     ) -> None:
         from excel_diff.reader import read_workbook
         from excel_diff.diff_engine import diff_files, RowTag
@@ -269,6 +284,16 @@ class TabSheetDiff(tk.Frame):
         else:
             config.diff_mode = "lcs"
             self._log("差分モード: LCS（行の出現順）")
+
+        if sub_key_cols_str:
+            config.sub_key_cols = parse_col_list(sub_key_cols_str)
+            try:
+                config.validate_subkey_config()
+            except ValueError as e:
+                self._log(f"エラー: {e}")
+                return
+            sub_disp = ", ".join(get_column_letter(c + 1) for c in config.sub_key_cols)
+            self._log(f"サブキー列: {sub_disp}")
 
         self._log("差分計算中...")
         old_label = f"{Path(old_file).name} [{old_sheet}]"
@@ -320,6 +345,7 @@ class TabSheetDiff(tk.Frame):
             "open_browser":  self._open_br.get(),
             "diff_mode":     self._mode.get(),
             "key_cols":      self._key_cols.get(),
+            "sub_key_cols":  self._sub_key_cols.get(),
         }
 
     def load_from_snapshot(self, snap: dict) -> None:
@@ -335,6 +361,7 @@ class TabSheetDiff(tk.Frame):
             "output_dir": self._out_dir,
             "include_cols": self._cols,
             "key_cols":   self._key_cols,
+            "sub_key_cols": self._sub_key_cols,
             "diff_mode":  self._mode,
         }
         for key, var in mapping.items():
@@ -360,4 +387,5 @@ class TabSheetDiff(tk.Frame):
             "open_browser":  self._open_br.get(),
             "diff_mode":     self._mode.get(),
             "key_cols":      self._key_cols.get(),
+            "sub_key_cols":  self._sub_key_cols.get(),
         })

@@ -28,6 +28,7 @@ class TabFileDiff(tk.Frame):
         self._cols      = tk.StringVar(value=cfg.get("file_diff", "include_cols"))
         self._matchers= tk.StringVar(value=cfg.get("file_diff", "matchers"))
         self._key_cols= tk.StringVar(value=cfg.get("file_diff", "key_cols"))
+        self._sub_key_cols = tk.StringVar(value=cfg.get("file_diff", "sub_key_cols"))
         self._strike  = tk.BooleanVar(value=cfg.get("file_diff", "strikethrough"))
         self._open_br = tk.BooleanVar(value=cfg.get("file_diff", "open_browser"))
         self._mode    = tk.StringVar(value=cfg.get("file_diff", "diff_mode", "lcs"))
@@ -75,6 +76,16 @@ class TabFileDiff(tk.Frame):
         self._entry_key.pack(side="left")
         tk.Label(fr_key, text="例: C  または  B,C", fg="gray").pack(side="left", padx=6)
 
+        fr_subkey = tk.Frame(grp_mode)
+        fr_subkey.pack(anchor="w", padx=8, pady=(0, 4))
+        tk.Label(fr_subkey, text="サブキー列", width=8, anchor="e").pack(side="left")
+        self._entry_subkey = tk.Entry(fr_subkey, textvariable=self._sub_key_cols, width=18)
+        self._entry_subkey.pack(side="left", padx=(2, 0))
+        tk.Label(
+            fr_subkey,
+            text="キーで対応が付かなかった行の救済照合。例: D", fg="gray",
+        ).pack(side="left", padx=6)
+
         # オプション折りたたみラベル
         ctrl_row = tk.Frame(self)
         ctrl_row.pack(fill="x", padx=6, pady=(6, 2))
@@ -104,6 +115,7 @@ class TabFileDiff(tk.Frame):
     def _on_mode(self) -> None:
         state = "normal" if self._mode.get() == "key" else "disabled"
         self._entry_key.config(state=state)
+        self._entry_subkey.config(state=state)
 
     def _toggle_opt(self, _=None) -> None:
         if self._opt_open:
@@ -174,6 +186,7 @@ class TabFileDiff(tk.Frame):
             "open_browser":  self._open_br.get(),
             "diff_mode":     self._mode.get(),
             "key_cols":      self._key_cols.get(),
+            "sub_key_cols":  self._sub_key_cols.get(),
         }
 
     def load_from_snapshot(self, snap: dict) -> None:
@@ -187,6 +200,7 @@ class TabFileDiff(tk.Frame):
             "include_cols": self._cols,
             "matchers":   self._matchers,
             "key_cols":   self._key_cols,
+            "sub_key_cols": self._sub_key_cols,
             "diff_mode":  self._mode,
         }
         for key, var in mapping.items():
@@ -231,6 +245,7 @@ class TabFileDiff(tk.Frame):
             "open_browser":  self._open_br.get(),
             "diff_mode": self._mode.get(),
             "key_cols":  self._key_cols.get(),
+            "sub_key_cols": self._sub_key_cols.get(),
         })
         cfg.save()
 
@@ -244,7 +259,8 @@ class TabFileDiff(tk.Frame):
             self._sheet_old.get().strip(), self._sheet_new.get().strip(),
             self._cols.get().strip(), self._matchers.get().strip(),
             self._strike.get(), self._mode.get(),
-            self._key_cols.get().strip(), self._open_br.get(),
+            self._key_cols.get().strip(), self._sub_key_cols.get().strip(),
+            self._open_br.get(),
         )
         self.after(100, self._poll)
 
@@ -261,7 +277,8 @@ class TabFileDiff(tk.Frame):
 
     def _do_diff(
         self, old_file, new_file, output, sheet_old, sheet_new, include_cols,
-        matchers_file, strikethrough, diff_mode, key_cols_str, open_browser,
+        matchers_file, strikethrough, diff_mode, key_cols_str,
+        sub_key_cols_str, open_browser,
     ) -> None:
         from excel_diff.reader import read_workbook, filter_sheets_by_pattern
         from excel_diff.diff_engine import diff_files, RowTag
@@ -305,6 +322,16 @@ class TabFileDiff(tk.Frame):
         else:
             config.diff_mode = "lcs"
             self._log("差分モード: LCS（行の出現順）")
+
+        if sub_key_cols_str:
+            config.sub_key_cols = parse_col_list(sub_key_cols_str)
+            try:
+                config.validate_subkey_config()
+            except ValueError as e:
+                self._log(f"エラー: {e}")
+                return
+            sub_disp = ", ".join(get_column_letter(c + 1) for c in config.sub_key_cols)
+            self._log(f"サブキー列: {sub_disp}")
 
         self._log("差分計算中...")
         file_diff = diff_files(
