@@ -82,7 +82,6 @@ def t_sub_key_cols_overlap_with_key_cols_exits():
 def t_profile_dir_diff_applies_sub_key_cols():
     """--profile（dir_diffタブ相当）の sub_key_cols が args に反映される
     （p-pipelineが --dir ... --profile <name> で使う経路）。"""
-    import tomllib
     profile_name = "__test_subkey_profile__"
     profile_path = _profiles_dir() / f"{profile_name}.toml"
     profile_path.write_text(
@@ -105,6 +104,23 @@ def t_profile_dir_diff_applies_sub_key_cols():
         assert args.sub_key_cols == "B", f"sub_key_cols が {args.sub_key_cols!r}（反映されていない）"
     finally:
         profile_path.unlink(missing_ok=True)
+
+
+def t_matchers_json_with_invalid_subkey_config_exits_cleanly():
+    """--matchers のJSONに不正な sub_key_cols 設定があった場合、生の
+    ValueError で落ちず、他のバリデーションと同様にエラー終了する。"""
+    import json
+    import tempfile
+    data = {"diff_mode": "lcs", "sub_key_cols": "B", "matchers": []}
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8"
+    ) as f:
+        json.dump(data, f)
+        path = f.name
+    try:
+        assert_raises(SystemExit, lambda: build_config(["--matchers", path]))
+    finally:
+        os.remove(path)
 
 
 def t_sub_key_cols_with_lcs_mode_exits():
@@ -131,6 +147,7 @@ if __name__ == "__main__":
     _run_test("サブキー: --key-colsと重複でエラー終了", t_sub_key_cols_overlap_with_key_cols_exits)
     _run_test("サブキー: lcsモードでエラー終了",        t_sub_key_cols_with_lcs_mode_exits)
     _run_test("サブキー: --profile(dir_diff)で反映",    t_profile_dir_diff_applies_sub_key_cols)
+    _run_test("サブキー: matchers JSON不正設定でエラー終了", t_matchers_json_with_invalid_subkey_config_exits_cleanly)
 
     print("=" * 50)
     print(f"結果: {len(PASS)} PASS / {len(FAIL)} FAIL")

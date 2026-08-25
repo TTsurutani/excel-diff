@@ -527,7 +527,11 @@ def _build_config(args: argparse.Namespace):
         if not os.path.isfile(args.matchers):
             print(f"エラー: マッチャー設定ファイルが見つかりません: {args.matchers}", file=sys.stderr)
             sys.exit(1)
-        config = load_config(args.matchers)
+        try:
+            config = load_config(args.matchers)
+        except ValueError as e:
+            print(f"エラー: マッチャー設定ファイルが不正です: {e}", file=sys.stderr)
+            sys.exit(1)
         print(f"カスタムマッチャー: {len(config.matchers)} 件ロード")
     else:
         config = DiffConfig()

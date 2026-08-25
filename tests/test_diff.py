@@ -724,6 +724,46 @@ def t_subkey_rescues_duplicate_key_overflow_row():
 # サブキー照合: HTML出力の色分け (_render_row_pair)
 # ---------------------------------------------------------------------------
 
+def t_subkey_preserves_old_row_order_when_rescued():
+    """サブキー救済されたペアも、旧ファイルの行順の位置に表示される
+    （SPEC.md 5-6: 表示順は旧ファイルの行順を基準とする、という既存の不変条件）。"""
+    config = DiffConfig(diff_mode="key", key_cols=[0], sub_key_cols=[1])
+    result = run_diff(
+        [["K1", "SA", "a"], ["K2", "SB", "b"], ["K3", "SC", "c"]],
+        [["K1", "SA", "a"], ["K3", "SC", "c"], ["K9", "SB", "d"]],
+        config=config,
+    )
+    sd = result.sheet_diffs[0]
+    keys = [
+        (rd.old_row.cells[0].value if rd.old_row else None,
+         rd.new_row.cells[0].value if rd.new_row else None)
+        for rd in sd.row_diffs
+    ]
+    assert keys == [("K1", "K1"), ("K2", "K9"), ("K3", "K3")], (
+        f"旧ファイルの行順（K1, K2/K9, K3）を保持していない: {keys}"
+    )
+
+
+def t_subkey_preserves_old_row_order_when_unrescued():
+    """サブキーで救済されない（曖昧一致にもならない、単に候補がない）DELETE行も、
+    旧ファイルの行順の位置に表示される。"""
+    config = DiffConfig(diff_mode="key", key_cols=[0], sub_key_cols=[1])
+    result = run_diff(
+        [["K1", "SA"], ["K2", "SX"], ["K3", "SY"]],
+        [["K1", "SA"], ["K3", "SY"]],
+        config=config,
+    )
+    sd = result.sheet_diffs[0]
+    keys = [
+        (rd.old_row.cells[0].value if rd.old_row else None,
+         rd.new_row.cells[0].value if rd.new_row else None)
+        for rd in sd.row_diffs
+    ]
+    assert keys == [("K1", "K1"), ("K2", None), ("K3", "K3")], (
+        f"旧ファイルの行順（K1, K2(削除), K3）を保持していない: {keys}"
+    )
+
+
 def t_subkey_matched_row_highlights_key_col():
     """サブキー救済ペアでは、旧主キー列のセルに専用クラス cell-modified-subkey が付く。
     サブキーと無関係な通常の変更列は従来通り cell-modified のまま。"""
@@ -812,6 +852,8 @@ if __name__ == "__main__":
     _run_test("サブキー: 曖昧一致は安全側フォールバック", t_subkey_ambiguous_match_falls_back)
     _run_test("サブキー: 空欄同士は一致させない",         t_subkey_blank_never_matches)
     _run_test("サブキー: 重複キー行の残りも救済対象",     t_subkey_rescues_duplicate_key_overflow_row)
+    _run_test("サブキー: 救済ペアも旧行順を保持",         t_subkey_preserves_old_row_order_when_rescued)
+    _run_test("サブキー: 未救済DELETEも旧行順を保持",     t_subkey_preserves_old_row_order_when_unrescued)
     _run_test("サブキー: 主キー列に専用色クラス",         t_subkey_matched_row_highlights_key_col)
     _run_test("サブキー: 通常MODIFYには専用色が付かない", t_normal_modify_row_has_no_subkey_class)
 
