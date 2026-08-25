@@ -42,6 +42,7 @@ class RowDiff:
     old_row: Optional[RowData] = None
     new_row: Optional[RowData] = None
     cell_diffs: list[CellDiff] = field(default_factory=list)  # MODIFY のときのみ
+    matched_by: Optional[str] = None  # "subkey" のときのみ設定（サブキー救済ペア）
 
 
 @dataclass
@@ -52,6 +53,7 @@ class SheetDiff:
     max_cols: int = 0
     col_letters: list[str] = field(default_factory=list)   # ["A", "B", ...]
     col_filter: Optional[set[int]] = None  # 比較対象列（None = 全列）
+    key_cols: list[int] = field(default_factory=list)  # キーJOINモードの主キー列（HTML描画用）
 
 
 @dataclass
@@ -237,6 +239,85 @@ def _compute_cell_diffs(
 
 
 # ---------------------------------------------------------------------------
+# サブキーによるフォールバック照合
+# ---------------------------------------------------------------------------
+
+def _apply_subkey_fallback(
+    sheet_name: str,
+    old_null: list[RowData],
+    new_null: list[RowData],
+    max_cols: int,
+    matchers: list[ColumnMatcher],
+    include_strike: bool,
+    col_filter: Optional[set[int]],
+    sub_key_cols: list[int],
+) -> tuple[list[RowDiff], list[RowData], list[RowData]]:
+    """
+    主キーで対応付けられなかった行（old_null / new_null）の中から、
+    サブキーが一意に一致する行同士だけを救済して対応付ける。
+
+    - サブキー値ごとに旧・新をグルーピングし、旧1件・新1件のときのみ確定マッチ
+      （0件や2件以上の曖昧一致は救済せず、そのまま未マッチとして残す）
+    - サブキー値に None を含む行（空欄サブキー）は一致対象にしない
+    - 救済されたペアは主キー列も含めて通常のセル単位比較を行う
+
+    戻り値: (救済された RowDiff のリスト, 未救済の old 行, 未救済の new 行)
+    """
+    if not sub_key_cols:
+        return [], old_null, new_null
+
+    sub_key_max = max(sub_key_cols) + 1
+
+    def get_subkey(row: RowData) -> tuple:
+        cells = _pad_cells(row.cells, max(max_cols, sub_key_max))
+        return tuple(_normalize_val(cells[i].value) for i in sub_key_cols)
+
+    def is_empty_subkey(key: tuple) -> bool:
+        return any(v is None for v in key)
+
+    old_keys = [get_subkey(row) for row in old_null]
+    new_keys = [get_subkey(row) for row in new_null]
+
+    old_groups: dict[tuple, list[RowData]] = {}
+    for row, key in zip(old_null, old_keys):
+        if not is_empty_subkey(key):
+            old_groups.setdefault(key, []).append(row)
+
+    new_groups: dict[tuple, list[RowData]] = {}
+    for row, key in zip(new_null, new_keys):
+        if not is_empty_subkey(key):
+            new_groups.setdefault(key, []).append(row)
+
+    rescued: list[RowDiff] = []
+    matched_old_ids: set[int] = set()
+    matched_new_ids: set[int] = set()
+    processed_keys: set[tuple] = set()
+
+    for row, key in zip(old_null, old_keys):
+        if is_empty_subkey(key) or key in processed_keys:
+            continue
+        processed_keys.add(key)
+
+        old_candidates = old_groups.get(key, [])
+        new_candidates = new_groups.get(key, [])
+        if len(old_candidates) == 1 and len(new_candidates) == 1:
+            old_row = old_candidates[0]
+            new_row = new_candidates[0]
+            cell_diffs = _compute_cell_diffs(
+                old_row, new_row, max_cols, sheet_name, matchers, include_strike, col_filter
+            )
+            tag = RowTag.MODIFY if cell_diffs else RowTag.EQUAL
+            rescued.append(RowDiff(tag, old_row, new_row, cell_diffs, matched_by="subkey"))
+            matched_old_ids.add(id(old_row))
+            matched_new_ids.add(id(new_row))
+        # 曖昧一致（0件 or 2件以上）はそのまま未マッチに残す（安全側へフォールバック）
+
+    remaining_old = [r for r in old_null if id(r) not in matched_old_ids]
+    remaining_new = [r for r in new_null if id(r) not in matched_new_ids]
+    return rescued, remaining_old, remaining_new
+
+
+# ---------------------------------------------------------------------------
 # メイン差分ロジック
 # ---------------------------------------------------------------------------
 
@@ -249,6 +330,7 @@ def _diff_sheet_rows_by_key(
     include_strike: bool,
     col_filter: Optional[set[int]],
     key_cols: list[int],
+    sub_key_cols: Optional[list[int]] = None,
 ) -> list[RowDiff]:
     """
     指定されたキー列で行を JOIN し、差分を計算して RowDiff のリストを返す。
@@ -309,7 +391,14 @@ def _diff_sheet_rows_by_key(
         if k not in old_keyed:
             all_keys.append(k)
 
-    result: list[RowDiff] = []
+    # ordered の要素は RowDiff（確定済み）か、確定を保留した行を示すマーカー
+    # ("DELETE_SLOT", old_row) / ("INSERT_SLOT", new_row)。
+    # マーカーを使うのは sub_key_cols 指定時のみ（表示順を保つため、後段の
+    # サブキー救済結果を「元の位置」に差し戻せるようにする）。
+    ordered: list = []
+    old_unmatched_valid: list[RowData] = []
+    new_unmatched_valid: list[RowData] = []
+
     for key in all_keys:
         old_row = old_keyed.get(key)
         new_row = new_keyed.get(key)
@@ -319,15 +408,77 @@ def _diff_sheet_rows_by_key(
                 old_row, new_row, max_cols, sheet_name, matchers, include_strike, col_filter
             )
             if cell_diffs:
-                result.append(RowDiff(RowTag.MODIFY, old_row, new_row, cell_diffs))
+                ordered.append(RowDiff(RowTag.MODIFY, old_row, new_row, cell_diffs))
             else:
-                result.append(RowDiff(RowTag.EQUAL, old_row, new_row))
+                ordered.append(RowDiff(RowTag.EQUAL, old_row, new_row))
         elif old_row is not None:
-            result.append(RowDiff(RowTag.DELETE, old_row, None))
+            if sub_key_cols:
+                old_unmatched_valid.append(old_row)
+                ordered.append(("DELETE_SLOT", old_row))
+            else:
+                ordered.append(RowDiff(RowTag.DELETE, old_row, None))
         else:
-            result.append(RowDiff(RowTag.INSERT, None, new_row))
+            if sub_key_cols:
+                new_unmatched_valid.append(new_row)
+                ordered.append(("INSERT_SLOT", new_row))
+            else:
+                ordered.append(RowDiff(RowTag.INSERT, None, new_row))
 
-    # 空キー行・キー重複行は LCS でフォールバック処理
+    # サブキーによる救済。未マッチプール = 空欄キー行・重複キー行の残り
+    # ＋ 有効キーだが相手不在の行、を統合した集合に対して行う。
+    subkey_diffs: list[RowDiff] = []
+    if sub_key_cols and (old_null or new_null or old_unmatched_valid or new_unmatched_valid):
+        old_null_ids = {id(r) for r in old_null}
+        new_null_ids = {id(r) for r in new_null}
+        subkey_diffs, remaining_old, remaining_new = _apply_subkey_fallback(
+            sheet_name,
+            old_null + old_unmatched_valid,
+            new_null + new_unmatched_valid,
+            max_cols, matchers, include_strike, col_filter, sub_key_cols,
+        )
+        # LCS フォールバックに渡す残りは、空欄/重複キー由来の分だけに絞る
+        # （有効キーだが相手不在だった分の残りは DELETE_SLOT/INSERT_SLOT 側で処理する）
+        old_null = [r for r in remaining_old if id(r) in old_null_ids]
+        new_null = [r for r in remaining_new if id(r) in new_null_ids]
+
+    # サブキーで結合されたペアを、旧行側の元の位置（DELETE_SLOT）に差し込む。
+    # 旧行側に元の位置がない（空欄/重複キー由来）場合は新行側の位置に差し込み、
+    # どちらの側にも元の位置がない場合は末尾に回す。
+    rescued_by_old_id = {id(rd.old_row): rd for rd in subkey_diffs}
+    rescued_by_new_id = {id(rd.new_row): rd for rd in subkey_diffs}
+    placed_rd_ids: set[int] = set()
+    consumed_new_ids: set[int] = set()
+
+    result: list[RowDiff] = []
+    for item in ordered:
+        if isinstance(item, RowDiff):
+            result.append(item)
+            continue
+        kind, row = item
+        if kind == "DELETE_SLOT":
+            rd = rescued_by_old_id.get(id(row))
+            if rd is not None:
+                result.append(rd)
+                placed_rd_ids.add(id(rd))
+                consumed_new_ids.add(id(rd.new_row))
+            else:
+                result.append(RowDiff(RowTag.DELETE, row, None))
+        else:  # INSERT_SLOT
+            if id(row) in consumed_new_ids:
+                continue  # 対応する旧行側の位置で既に差し込み済み
+            rd = rescued_by_new_id.get(id(row))
+            if rd is not None:
+                result.append(rd)
+                placed_rd_ids.add(id(rd))
+            else:
+                result.append(RowDiff(RowTag.INSERT, None, row))
+
+    # どちらの側も元の位置を持たない（空欄/重複キー由来同士の）救済ペアは末尾に回す
+    for rd in subkey_diffs:
+        if id(rd) not in placed_rd_ids:
+            result.append(rd)
+
+    # 空キー行・キー重複行・サブキーでも救済できなかった行は LCS でフォールバック処理
     if old_null or new_null:
         result.extend(
             _diff_sheet_rows(
@@ -426,11 +577,13 @@ def diff_files(
         get_col_filter = config.get_col_filter
         diff_mode = getattr(config, "diff_mode", "lcs")
         key_cols   = getattr(config, "key_cols",   [])
+        sub_key_cols = getattr(config, "sub_key_cols", [])
     else:
         effective_matchers = matchers or []
         get_col_filter = lambda _sheet: None  # noqa: E731
         diff_mode = "lcs"
         key_cols  = []
+        sub_key_cols = []
 
     result = FileDiff(
         old_path=old_path,
@@ -501,6 +654,7 @@ def diff_files(
                     include_strike,
                     col_filter,
                     key_cols,
+                    sub_key_cols,
                 )
             else:
                 row_diffs = _diff_sheet_rows(
@@ -514,7 +668,10 @@ def diff_files(
                 )
             has_diff = any(rd.tag != RowTag.EQUAL for rd in row_diffs)
             status = "modified" if has_diff else "equal"
-            result.sheet_diffs.append(SheetDiff(name, status, row_diffs, max_cols, col_letters, col_filter))
+            sheet_key_cols = key_cols if diff_mode == "key" else []
+            result.sheet_diffs.append(
+                SheetDiff(name, status, row_diffs, max_cols, col_letters, col_filter, sheet_key_cols)
+            )
             if has_diff:
                 result.has_differences = True
 

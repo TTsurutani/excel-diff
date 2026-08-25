@@ -1,0 +1,7 @@
+{
+  "matchers": [
+    { "type": "equivalence", "column": "H", "values": ["シンプル", "", "-"] },
+    { "type": "equivalence", "column": "G", "values": ["テキスト", "", "-", "なし"] },
+    { "type": "equivalence", "column": "*", "values": ["-", ""] }
+  ]
+}

@@ -155,6 +155,7 @@ excel-diff.exe --split <ブック.xlsx> [--prefix TEXT] [--suffix TEXT] [--name-
 | `--matchers FILE` | カスタムマッチャー／列フィルタ設定JSONファイル | なし |
 | `--include-cols SPEC` | 比較対象列の指定（例: `B:U`） | 全列比較 |
 | `--key-cols SPEC` | キーJOIN差分モードのキー列（例: `C` / `B,C`）。指定するとキーモードが有効になる | なし |
+| `--sub-key-cols SPEC` | 主キーで対応が確定しなかった行を救済する2段目のキー列（例: `D`）。`--key-cols`（keyモード）と併用時のみ有効 | なし |
 | `--diff-mode MODE` | 差分モード: `lcs` または `key` | `lcs` |
 | `--open` / `--no-open` | ファイル比較: 生成HTMLをブラウザで開く。フォルダ比較: ★index.xlsx をExcelで開く | 有効 |
 
@@ -292,6 +293,41 @@ for key in all_keys:
 
 キー列自体の値が変わった行は「DELETE + INSERT」として表示される（キーが変わったら別行扱い）。
 
+### 5-6-1. サブキーによる救済照合（`sub_key_cols`）
+
+主キーで対応が確定しなかった行（キー値が空欄／重複していた行、および有効な一意キーだが
+相手側に存在しない行）を「未マッチプール」とし、主キー照合の直後・既存LCSフォールバック
+の前に、`sub_key_cols` で指定した列によるもう一段の照合を試みる。key-JOINモード限定。
+
+```
+old_pool = 空欄キー行 + 重複キー行(2件目以降) + (有効キーだが相手不在の行)
+new_pool = 同上（new側）
+
+サブキー値ごとに old_pool / new_pool をグルーピング:
+    旧1件・新1件のみ → 確定マッチ（セル単位比較。主キー列も比較対象に含む）
+    それ以外（0件・2件以上） → 曖昧一致として救済しない
+サブキー値に None を含む行（空欄サブキー） → 一致対象にしない
+```
+
+救済できなかった残りは元の由来ごとに行き先が分かれる：
+
+| 元の由来 | 救済できなかった場合の扱い |
+|---|---|
+| 空欄キー行・重複キー行 | 従来通り既存のLCSフォールバックへ |
+| 有効な一意キーだが相手不在だった行 | そのままDELETE/INSERTに確定（LCSは経由しない） |
+
+サブキーの一致判定は主キーと同一の制約に従う：マッチャー（mapping/equivalence）は使わず
+正規化済みの生値の厳密一致のみ、`include_cols`によるフィルタとは独立、実行全体で1つの
+グローバル設定（シート単位の個別指定は不可）。`key_cols`と`sub_key_cols`への同一列の
+重複指定、および`sub_key_cols`指定時に`diff_mode`が`key`でない場合や`key_cols`が空の
+場合は`DiffConfig`構築時にエラーとなる（`DiffConfig.validate_subkey_config()`）。
+
+サブキーで対応付いたペアに限り、旧・新の主キー列も通常のセルレベルdiff対象に含まれる
+（主キー列自体の値が食い違っているため）。HTML出力ではこの列のセルに専用クラス
+`cell-modified-subkey`（背景色 `#e8dcff`）が付き、通常のMODIFYセル（`cell-modified`、
+`#fff8c5`）と区別される。行番号セルの着色（EQUAL/DELETE/INSERT/MODIFYの4分類）は
+変更しない。詳細は [`docs/adr/0001-subkey-fallback-matching.md`](docs/adr/0001-subkey-fallback-matching.md) を参照。
+
 ### 5-7. セルレベルdiff（MODIFYの行のみ）
 
 1. 旧行・新行の列数を `max(旧列数, 新列数)` に揃えてNoneでパディング
@@ -410,6 +446,18 @@ excel-diff.exe old.xlsx new.xlsx --include-cols "B:U"
   "diff_mode": "key",
   "key_cols": ["B", "C"],
   "include_cols": "B:U",
+  "matchers": []
+}
+```
+
+サブキー（`sub_key_cols`）も同様に文字列（`"D"` / `"D,E"`）または配列（`["D"]`）で指定できる。
+`key_cols`と併用時のみ有効：
+
+```json
+{
+  "diff_mode": "key",
+  "key_cols": ["A"],
+  "sub_key_cols": ["B"],
   "matchers": []
 }
 ```
@@ -624,7 +672,10 @@ DiffConfig
   sheet_col_filters: dict[str, set[int]]  シート別フィルタ（グローバルより優先）
   diff_mode: str                          "lcs"（デフォルト）または "key"
   key_cols: list[int]                     キーJOIN時のキー列（0始まり、順序保持）
+  sub_key_cols: list[int]                 主キーで対応が確定しなかった行を救済する
+                                           2段目のキー列（0始まり、順序保持）
   get_col_filter(sheet_name) → Optional[set[int]]
+  validate_subkey_config() → None         sub_key_cols の妥当性検証（不正時に ValueError）
 
 CellDiff
   col_idx: int             変更列（0始まり）
@@ -636,6 +687,7 @@ RowDiff
   old_row: Optional[RowData]
   new_row: Optional[RowData]
   cell_diffs: list[CellDiff]   MODIFYの場合のみ
+  matched_by: Optional[str]   "subkey"のときのみ設定（サブキー救済ペア）
 
 SheetDiff
   name: str
@@ -644,6 +696,7 @@ SheetDiff
   max_cols: int
   col_letters: list[str]   ["A", "B", "C", ...]
   col_filter: Optional[set[int]]   比較対象列（Noneは全列）
+  key_cols: list[int]      キーJOINモードの主キー列（HTML描画でのサブキー色分け判定用）
 
 FileDiff
   old_path: str
@@ -750,6 +803,8 @@ PatternStore                （patterns.py）
 
 - `tests/make_fixtures.py` でテスト用Excelファイルを自動生成（外部ファイル依存なし）
 - `tests/test_diff.py` でdiffエンジンのユニットテスト（openpyxlを使わずデータモデル直接）
+- `tests/test_cli.py` でCLI引数（argparse）→ `DiffConfig` 変換のユニットテスト
+- GUI（`excel_diff_gui/`）は自動テスト対象外。手動確認、またはIDE診断・コンパイルチェックで代替する
 
 ---
 
