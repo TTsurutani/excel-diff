@@ -764,6 +764,32 @@ def t_subkey_preserves_old_row_order_when_unrescued():
     )
 
 
+def t_subkey_old_row_index_stays_ascending():
+    """不変条件: old_row を持つ行は、シート内のどこであっても
+    old_row_idx が単調増加でなければならない（表示順が旧ファイルの
+    行順から外れていないことの直接的な検証）。
+    サブキーで救済されるかどうかに関わらず、ランダムなキー配置で検証する。"""
+    config = DiffConfig(diff_mode="key", key_cols=[0], sub_key_cols=[1])
+    result = run_diff(
+        [
+            ["K1", "SA", "a"], ["K2", "SB", "b"], ["K3", "SC", "c"],
+            ["K4", "SD", "d"], ["K5", None, "e"], ["K5", "SF", "f"],  # K5重複
+        ],
+        [
+            ["K1", "SA", "a"], ["K3", "SX", "c2"],  # K3は主キー一致(MODIFY)
+            ["K9", "SB", "b2"],                      # K2をサブキー救済
+            ["K10", "SD", "d2"],                     # K4をサブキー救済
+            ["K11", "SF", "f2"],                     # 重複キー行2件目を救済
+        ],
+        config=config,
+    )
+    sd = result.sheet_diffs[0]
+    old_indices = [rd.old_row.row_idx for rd in sd.row_diffs if rd.old_row is not None]
+    assert old_indices == sorted(old_indices), (
+        f"old_row_idx が単調増加でない（表示順が旧ファイルの行順から外れている）: {old_indices}"
+    )
+
+
 def t_subkey_matched_row_highlights_key_col():
     """サブキー救済ペアでは、旧主キー列のセルに専用クラス cell-modified-subkey が付く。
     サブキーと無関係な通常の変更列は従来通り cell-modified のまま。"""
@@ -854,6 +880,7 @@ if __name__ == "__main__":
     _run_test("サブキー: 重複キー行の残りも救済対象",     t_subkey_rescues_duplicate_key_overflow_row)
     _run_test("サブキー: 救済ペアも旧行順を保持",         t_subkey_preserves_old_row_order_when_rescued)
     _run_test("サブキー: 未救済DELETEも旧行順を保持",     t_subkey_preserves_old_row_order_when_unrescued)
+    _run_test("サブキー: old_row_idxが常に単調増加",      t_subkey_old_row_index_stays_ascending)
     _run_test("サブキー: 主キー列に専用色クラス",         t_subkey_matched_row_highlights_key_col)
     _run_test("サブキー: 通常MODIFYには専用色が付かない", t_normal_modify_row_has_no_subkey_class)
 
