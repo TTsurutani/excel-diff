@@ -648,7 +648,22 @@ excel-diff.exe old.xlsx new.xlsx --matchers matchers.json
 
 CRM自動生成データと手動メンテのExcel原本など、由来の異なる2ファイルを比較する際に発生しやすい型違いの疑似差分（[Issue #14](https://github.com/TTsurutani/excel-diff/issues/14)）はこのマッチャーで回避できる。
 
-**注意（既知の制限、[Issue #20](https://github.com/TTsurutani/excel-diff/issues/20)）**: `numeric` は非数値同士のフォールバック比較で `"-"` と空欄（`None`）を同一視**しない**（`equivalence` と違い `values` を持たないため）。特定列の `numeric` ルールを全列適用の `"-"`/`""` 同一視 `equivalence`（`column: "*"`）より前に配置すると、優先順位の仕組み上その列では `"*"` の空欄同一視が効かなくなる。実際に `profiles/matchers.json` のI,J,K,L列は `numeric` を `"*"` より前に置いているため、これらの列で `"-"` と空欄が混在するデータが来ると新たな疑似差分になり得る（現状の実データでは4列とも `"-"` で統一されており未発生）。
+**`numeric` を `equivalence("*")` より前に配置する場合は `chain` で組み合わせる（[Issue #20](https://github.com/TTsurutani/excel-diff/issues/20) / [Issue #23](https://github.com/TTsurutani/excel-diff/issues/23)）**: 優先順位ルール上、特定列の `numeric` を全列適用の `equivalence`（`column: "*"`）より前に置くと、その列では `"*"` の `"-"`/`""` 同一視が効かなくなり、`"-"` と空欄（`None`）が混在するデータで疑似差分が発生する（実際に複数シートで発生を確認済み）。
+
+「1列につき1マッチャーだけを選ぶ」という設計自体が、こうした複数の関心事（型を揃える／空欄を同一視する）を1列に重ねたい場合に無理が出る。これを解消するため、複数のマッチャーを順に試す `chain` タイプを使う。`of` に列挙したマッチャーを順に試し、最初に判定できた（`can_handle` が `True` を返した）ものの結果を採用する。`numeric` は両方の値が数値変換できる場合のみ判定でき、それ以外は次のマッチャーに委ねる。
+
+```json
+{
+  "matchers": [
+    { "type": "chain", "column": "I", "of": [
+        { "type": "numeric" },
+        { "type": "equivalence", "values": ["-", ""] }
+    ] }
+  ]
+}
+```
+
+`profiles/matchers.json` のI,J,K,L列はこの `chain` 記法（numeric → equivalenceフォールバック）を使用している。`numeric` を `"*"` より前に配置する際は、対象列に空欄が入り得るなら必ず `chain` で `equivalence` フォールバックを組み合わせること。設計の背景は [Issue #23](https://github.com/TTsurutani/excel-diff/issues/23) を参照。
 
 ---
 

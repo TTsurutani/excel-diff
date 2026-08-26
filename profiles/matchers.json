@@ -2,10 +2,22 @@
   "matchers": [
     { "type": "equivalence", "column": "H", "values": ["シンプル", "", "-"] },
     { "type": "equivalence", "column": "G", "values": ["テキスト", "", "-", "なし"] },
-    { "type": "numeric", "column": "I" },
-    { "type": "numeric", "column": "J" },
-    { "type": "numeric", "column": "K" },
-    { "type": "numeric", "column": "L" },
+    { "type": "chain", "column": "I", "of": [
+        { "type": "numeric" },
+        { "type": "equivalence", "values": ["-", ""] }
+    ] },
+    { "type": "chain", "column": "J", "of": [
+        { "type": "numeric" },
+        { "type": "equivalence", "values": ["-", ""] }
+    ] },
+    { "type": "chain", "column": "K", "of": [
+        { "type": "numeric" },
+        { "type": "equivalence", "values": ["-", ""] }
+    ] },
+    { "type": "chain", "column": "L", "of": [
+        { "type": "numeric" },
+        { "type": "equivalence", "values": ["-", ""] }
+    ] },
     { "type": "equivalence", "column": "*", "values": ["-", ""] }
   ]
 }

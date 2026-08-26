@@ -18,6 +18,7 @@ from excel_diff.matcher import (
     MappingMatcher,
     EquivalenceMatcher,
     NumericMatcher,
+    ChainMatcher,
     ALL_COLUMNS,
     DiffConfig,
     parse_col_spec,
@@ -420,6 +421,139 @@ def t_numeric_matcher_lcs_row_key():
         matchers=[NumericMatcher(column_idx=1, sheet=None)],
     )
     assert not result.has_differences, "LCS行キー生成でint/strの型違いが同一視されなかった"
+
+
+# --- can_handle（issue #23: ChainMatcherのサブマッチャー選択に使う）---
+
+def t_numeric_matcher_can_handle_true_when_both_numeric():
+    matcher = NumericMatcher(column_idx=1, sheet=None)
+    assert matcher.can_handle(128, "128") is True
+
+
+def t_numeric_matcher_can_handle_false_when_either_non_numeric():
+    matcher = NumericMatcher(column_idx=1, sheet=None)
+    assert matcher.can_handle("-", "128") is False
+    assert matcher.can_handle("-", "-") is False
+
+
+def t_default_can_handle_is_always_true():
+    """can_handle をオーバーライドしないマッチャーは常にTrue（後方互換）。"""
+    matcher = EquivalenceMatcher(column_idx=1, sheet=None, values=["-", ""])
+    assert matcher.can_handle("何でも", "任意の値") is True
+
+
+# --- ChainMatcher: 複数マッチャーの合成（issue #23、numericの空欄同一視版）---
+
+def _numeric_then_blank_chain(col_idx=1, sheet=None):
+    """numeric で扱えない値は equivalence("-"/空欄同一視) にフォールバックするchain。"""
+    return ChainMatcher(
+        column_idx=col_idx,
+        sheet=sheet,
+        sub_matchers=[
+            NumericMatcher(col_idx, sheet),
+            EquivalenceMatcher(col_idx, sheet, values=["-", ""]),
+        ],
+    )
+
+
+def t_chain_matcher_numeric_int_vs_str():
+    """chainの1段目(numeric)が扱える値は数値として同一視されること。"""
+    result = run_diff(
+        [["名前", "最大文字数"], ["A商事", 128]],
+        [["名前", "最大文字数"], ["A商事", "128"]],
+        matchers=[_numeric_then_blank_chain()],
+    )
+    assert not result.has_differences, "chain経由でint/str同一視が機能しなかった"
+
+
+def t_chain_matcher_falls_back_to_blank_equivalence():
+    """
+    numericでは扱えない「"-" と空欄(None)」が、chainの2段目(equivalence)で
+    同一視されること（issue #20で発生した疑似差分の再発防止）。
+    """
+    result = run_diff(
+        [["名前", "最小値"], ["A商事", "-"]],
+        [["名前", "最小値"], ["A商事", None]],
+        matchers=[_numeric_then_blank_chain()],
+    )
+    assert not result.has_differences, "chainのフォールバックで「-」と空欄が同一視されなかった"
+
+
+def t_chain_matcher_rejects_non_blank_diff():
+    """chainのどの段でも扱えない変化は引き続き差分として検出されること。"""
+    result = run_diff(
+        [["名前", "最小値"], ["A商事", "-"]],
+        [["名前", "最小値"], ["A商事", "別の値"]],
+        matchers=[_numeric_then_blank_chain()],
+    )
+    assert result.has_differences, "chainでグループ外への変化が差分なしと判定された"
+
+
+def t_chain_matcher_numeric_priority_over_blank():
+    """数値として異なる値は、equivalenceの"-"にたまたま合致しなければ差分あり。"""
+    result = run_diff(
+        [["名前", "最大文字数"], ["A商事", 128]],
+        [["名前", "最大文字数"], ["A商事", "129"]],
+        matchers=[_numeric_then_blank_chain()],
+    )
+    assert result.has_differences, "chainで数値として異なる値が差分なしと判定された"
+
+
+def t_chain_matcher_lcs_row_key_numeric():
+    """LCSの行マッチングでもchainの1段目(numeric)による同一視が効くこと。"""
+    result = run_diff(
+        [["No", "最大文字数"], [1, 128], [2, "-"]],
+        [["No", "最大文字数"], [1, "128"], [2, "-"]],
+        matchers=[_numeric_then_blank_chain()],
+    )
+    assert not result.has_differences, "LCS行キー生成でchainのnumeric同一視が効かなかった"
+
+
+def t_chain_matcher_lcs_row_key_blank_fallback():
+    """LCSの行マッチングでもchainのフォールバック(equivalence)による同一視が効くこと。"""
+    result = run_diff(
+        [["No", "最小値"], [1, "-"]],
+        [["No", "最小値"], [1, None]],
+        matchers=[_numeric_then_blank_chain()],
+    )
+    assert not result.has_differences, "LCS行キー生成でchainのblankフォールバックが効かなかった"
+
+
+def t_chain_matcher_requires_at_least_one_sub_matcher():
+    try:
+        ChainMatcher(column_idx=1, sheet=None, sub_matchers=[])
+        assert False, "空のsub_matchersでエラーにならなかった"
+    except ValueError:
+        pass
+
+
+def t_load_config_reads_chain_matcher():
+    """JSON設定ファイルから chain タイプ（numeric + equivalence フォールバック）を読み込めること。"""
+    import json
+    import tempfile
+
+    config_data = {
+        "matchers": [
+            {"type": "chain", "column": "B", "of": [
+                {"type": "numeric"},
+                {"type": "equivalence", "values": ["-", ""]},
+            ]},
+        ],
+    }
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8"
+    ) as f:
+        json.dump(config_data, f)
+        path = f.name
+    try:
+        config = load_config(path)
+        matcher = config.matchers[0]
+        assert isinstance(matcher, ChainMatcher)
+        assert len(matcher.sub_matchers) == 2
+        assert matcher.matches(128, "128"), "JSON経由のchainでnumeric同一視が機能しなかった"
+        assert matcher.matches("-", None), "JSON経由のchainでblankフォールバックが機能しなかった"
+    finally:
+        os.unlink(path)
 
 
 # --- 行番号の正確性 ---
@@ -991,6 +1125,17 @@ if __name__ == "__main__":
     _run_test("numeric: 非数値は通常比較にフォールバック", t_numeric_matcher_non_numeric_fallback)
     _run_test("numeric: 非数値の無変更は差分なし",       t_numeric_matcher_non_numeric_unchanged)
     _run_test("numeric: LCS行キーでも型違いを同一視",     t_numeric_matcher_lcs_row_key)
+    _run_test("can_handle: numericは両方数値の時のみTrue", t_numeric_matcher_can_handle_true_when_both_numeric)
+    _run_test("can_handle: numericは非数値混在でFalse",   t_numeric_matcher_can_handle_false_when_either_non_numeric)
+    _run_test("can_handle: 未オーバーライドは常にTrue",    t_default_can_handle_is_always_true)
+    _run_test("chain: numeric段でint/str同一視",          t_chain_matcher_numeric_int_vs_str)
+    _run_test("chain: equivalence段で「-」/空欄を同一視", t_chain_matcher_falls_back_to_blank_equivalence)
+    _run_test("chain: グループ外は差分あり",              t_chain_matcher_rejects_non_blank_diff)
+    _run_test("chain: 数値として異なれば差分あり",         t_chain_matcher_numeric_priority_over_blank)
+    _run_test("chain: LCS行キーでnumeric同一視",           t_chain_matcher_lcs_row_key_numeric)
+    _run_test("chain: LCS行キーでblankフォールバック",     t_chain_matcher_lcs_row_key_blank_fallback)
+    _run_test("chain: サブマッチャー0件はエラー",          t_chain_matcher_requires_at_least_one_sub_matcher)
+    _run_test("chain: JSON設定から読み込める",             t_load_config_reads_chain_matcher)
     _run_test("行番号の正確性",                      t_row_numbers)
 
     print()
