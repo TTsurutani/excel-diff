@@ -102,9 +102,12 @@ def _cell_equal(
 ) -> bool:
     """2つのセルが「等値」かどうかを判定する。"""
     # カスタムマッチャーが適用される列かチェック
+    # マッチャーへ渡す前に _normalize_val で正規化する（_x000D_ 除去・改行コード統一）。
+    # マッチャー自身は "-"/"" の同一視など独自ロジックのみを担い、
+    # 改行コード等の表記ゆれ吸収はデフォルト比較と同じ土台で行う。
     for m in matchers:
         if m.applies_to(sheet_name, col_idx):
-            return m.matches(old_cell.value, new_cell.value)
+            return m.matches(_normalize_val(old_cell.value), _normalize_val(new_cell.value))
 
     # デフォルト比較（None と空文字列は同一視）
     if include_strike:
@@ -132,14 +135,17 @@ def _normalize_row_key(
     for i, cell in enumerate(cells):
         if col_filter is not None and i not in col_filter:
             continue  # 比較対象外の列はハッシュから除外
-        val = cell.value
+        # マッチャー未適用列・適用列のいずれも _normalize_val を通す
+        # （_x000D_ 除去・改行コード統一）。_cell_equal 側と同じ土台で
+        # 正規化しないと、LCSの行マッチングだけ表記ゆれを拾ってしまう。
+        val = _normalize_val(cell.value)
         matched = False
         for m in matchers:
             if m.applies_to(sheet_name, i):
                 if side == "old":
-                    val = m.normalize_old(cell.value)
+                    val = m.normalize_old(_normalize_val(cell.value))
                 else:
-                    val = m.normalize_new(cell.value)
+                    val = m.normalize_new(_normalize_val(cell.value))
                 matched = True
                 break
         if not matched and include_strike:
