@@ -642,7 +642,7 @@ excel-diff.exe old.xlsx new.xlsx --matchers matchers.json
 
 プロファイル・マッチャー設定とは別に、diff本体のコードに直接書かれている決め打ちの変換・削除・除外条件がある。ソースコード調査（2026-08-14時点）に基づく。
 
-- プロファイル・マッチャー未指定の列でも、セル比較の**デフォルト処理として空文字列とNoneを常に同一視**し、`_x000D_` の除去・改行コード（CRLF/CR→LF）統一を常に行う（`excel_diff/diff_engine.py:77-90`）。「equivalenceマッチャーで空欄同一視」という説明はプロファイル側の話であり、実際は素の比較でも空文字とNoneは常に同一視される
+- セル比較は列がマッチャー適用列かどうかに関わらず、**デフォルト処理として空文字列とNoneを常に同一視**し、`_x000D_` の除去・改行コード（CRLF/CR→LF）統一を常に行う（`excel_diff/diff_engine.py:79-90`）。マッチャー（mapping/equivalence）に渡す値もこの正規化を経てから渡される（`_cell_equal`/`_normalize_row_key` 内、`excel_diff/diff_engine.py:95-118, 121-152`）。旧版では「マッチャー未適用列のみ正規化される」実装になっており、`equivalence`（特に `column: "*"`）を使うと `_x000D_` 等の表記ゆれがそのまま差分検出されてしまう不具合があった（[Issue #19](https://github.com/TTsurutani/excel-diff/issues/19) で修正）
 - 読み込み時、末尾が全セルNoneの行は無条件で除去される（`excel_diff/reader.py:86-87`）。設定では制御不可
 - `.xlsx` 以外のファイル、および `~$` で始まるファイル（Excelの一時/ロックファイル）を除外するロジックが `file_pairing.py` / `__main__.py` / `tab_patterns.py` の3箇所に重複実装されている
 - `--sheet-old`/`--sheet-new` の正規表現が複数シートにマッチした場合、常に先頭の1枚のみを採用し、他のマッチシートは警告のみで無条件に無視する（`excel_diff/reader.py:95-114`）

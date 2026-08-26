@@ -306,6 +306,54 @@ def t_equivalence_all_columns_wildcard():
     assert not result.has_differences, "全列ワイルドカードで差分が検出された"
 
 
+# --- カスタムマッチャー適用列でも _x000D_ / 改行コード差異を正規化する（issue #19）---
+
+def t_equivalence_normalizes_x000d():
+    """
+    全列適用(ALL_COLUMNS)の equivalence マッチャーが指定されていても、
+    Excel由来の _x000D_ (セル内改行の内部テキスト表現) や CRLF/CR の
+    表記ゆれは差分として検出されないこと。
+    """
+    matcher = EquivalenceMatcher(
+        column_idx=ALL_COLUMNS,
+        sheet=None,
+        values=["-", ""],
+    )
+    result = run_diff(
+        [["名前", "選択肢"], ["A商事", "0:いいえ_x000D_\n1:はい"]],
+        [["名前", "選択肢"], ["A商事", "0:いいえ\n1:はい"]],
+        matchers=[matcher],
+    )
+    assert not result.has_differences, "_x000D_ の表記ゆれがマッチャー適用列で誤検出された"
+
+
+def t_mapping_matcher_normalizes_x000d():
+    """MappingMatcher が適用される列でも同様に正規化されること。"""
+    matcher = MappingMatcher(
+        column_idx=1,
+        sheet=None,
+        pairs=[("旧コード", "新コード")],
+    )
+    result = run_diff(
+        [["名前", "コード"], ["A商事", "説明\r\n続き"]],
+        [["名前", "コード"], ["A商事", "説明\n続き"]],  # CRLF → LF のみの差
+        matchers=[matcher],
+    )
+    assert not result.has_differences, "CRLF表記ゆれがMappingMatcher適用列で誤検出された"
+
+
+def t_lcs_row_key_normalizes_x000d_unmatched_column():
+    """
+    マッチャー未適用列でも、LCSの行マッチング用キー生成(_normalize_row_key)が
+    _x000D_ / 改行コードを正規化すること（他列は完全一致の行がEQUALになる）。
+    """
+    result = run_diff(
+        [["No", "選択肢"], [1, "0:いいえ_x000D_\n1:はい"]],
+        [["No", "選択肢"], [1, "0:いいえ\n1:はい"]],
+    )
+    assert not result.has_differences, "_x000D_ の表記ゆれがLCS行マッチングで誤検出された"
+
+
 # --- 行番号の正確性 ---
 
 def t_row_numbers():
@@ -866,6 +914,9 @@ if __name__ == "__main__":
     _run_test("equiv: 無変更を誤検出しない", t_equivalence_unchanged_not_flagged)
     _run_test("equiv: グループ外は差分あり", t_equivalence_outside_group_still_diffs)
     _run_test("equiv: 全列ワイルドカード",   t_equivalence_all_columns_wildcard)
+    _run_test("equiv: _x000D_の表記ゆれを正規化",     t_equivalence_normalizes_x000d)
+    _run_test("mapping: CRLF表記ゆれを正規化",         t_mapping_matcher_normalizes_x000d)
+    _run_test("LCS行キー: 未適用列の_x000D_を正規化",  t_lcs_row_key_normalizes_x000d_unmatched_column)
     _run_test("行番号の正確性",                      t_row_numbers)
 
     print()
