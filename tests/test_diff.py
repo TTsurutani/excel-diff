@@ -17,6 +17,7 @@ from excel_diff.diff_engine import diff_files, RowTag
 from excel_diff.matcher import (
     MappingMatcher,
     EquivalenceMatcher,
+    NumericMatcher,
     ALL_COLUMNS,
     DiffConfig,
     parse_col_spec,
@@ -352,6 +353,73 @@ def t_lcs_row_key_normalizes_x000d_unmatched_column():
         [["No", "選択肢"], [1, "0:いいえ\n1:はい"]],
     )
     assert not result.has_differences, "_x000D_ の表記ゆれがLCS行マッチングで誤検出された"
+
+
+# --- カスタムマッチャー: numeric（数値/数字文字列の型違いを同一視、issue #14）---
+
+def t_numeric_matcher_int_vs_str():
+    """int(128) と str('128') が同一視されること。"""
+    matcher = NumericMatcher(column_idx=1, sheet=None)
+    result = run_diff(
+        [["名前", "文字数上限"], ["A商事", 128]],
+        [["名前", "文字数上限"], ["A商事", "128"]],
+        matchers=[matcher],
+    )
+    assert not result.has_differences, "int/str の型違いが数値として同一視されなかった"
+
+
+def t_numeric_matcher_float_vs_str():
+    """float と数字文字列も同一視されること。"""
+    matcher = NumericMatcher(column_idx=1, sheet=None)
+    result = run_diff(
+        [["名前", "小数点"], ["A商事", 1.5]],
+        [["名前", "小数点"], ["A商事", "1.5"]],
+        matchers=[matcher],
+    )
+    assert not result.has_differences, "float/str の型違いが数値として同一視されなかった"
+
+
+def t_numeric_matcher_different_numbers_still_diff():
+    """数値として値そのものが異なる場合は引き続き差分として検出されること。"""
+    matcher = NumericMatcher(column_idx=1, sheet=None)
+    result = run_diff(
+        [["名前", "文字数上限"], ["A商事", 128]],
+        [["名前", "文字数上限"], ["A商事", "129"]],
+        matchers=[matcher],
+    )
+    assert result.has_differences, "数値として異なる値が差分なしと判定された"
+
+
+def t_numeric_matcher_non_numeric_fallback():
+    """"-" のような非数値は従来通り通常の文字列比較で区別されること。"""
+    matcher = NumericMatcher(column_idx=1, sheet=None)
+    result = run_diff(
+        [["名前", "文字数上限"], ["A商事", "-"]],
+        [["名前", "文字数上限"], ["A商事", "128"]],
+        matchers=[matcher],
+    )
+    assert result.has_differences, "非数値から数値への変化が差分なしと判定された"
+
+
+def t_numeric_matcher_non_numeric_unchanged():
+    """非数値同士で値が同じ場合は差分なしのまま。"""
+    matcher = NumericMatcher(column_idx=1, sheet=None)
+    result = run_diff(
+        [["名前", "文字数上限"], ["A商事", "-"]],
+        [["名前", "文字数上限"], ["A商事", "-"]],
+        matchers=[matcher],
+    )
+    assert not result.has_differences, "非数値の無変更行が誤って差分ありと判定された"
+
+
+def t_numeric_matcher_lcs_row_key():
+    """LCSの行マッチング（normalize_old/new）でも int/str が同一視されること。"""
+    result = run_diff(
+        [["No", "文字数上限"], [1, 128], [2, "-"]],
+        [["No", "文字数上限"], [1, "128"], [2, "-"]],
+        matchers=[NumericMatcher(column_idx=1, sheet=None)],
+    )
+    assert not result.has_differences, "LCS行キー生成でint/strの型違いが同一視されなかった"
 
 
 # --- 行番号の正確性 ---
@@ -917,6 +985,12 @@ if __name__ == "__main__":
     _run_test("equiv: _x000D_の表記ゆれを正規化",     t_equivalence_normalizes_x000d)
     _run_test("mapping: CRLF表記ゆれを正規化",         t_mapping_matcher_normalizes_x000d)
     _run_test("LCS行キー: 未適用列の_x000D_を正規化",  t_lcs_row_key_normalizes_x000d_unmatched_column)
+    _run_test("numeric: int/strの型違いを同一視",       t_numeric_matcher_int_vs_str)
+    _run_test("numeric: float/strの型違いを同一視",     t_numeric_matcher_float_vs_str)
+    _run_test("numeric: 値が異なれば差分あり",           t_numeric_matcher_different_numbers_still_diff)
+    _run_test("numeric: 非数値は通常比較にフォールバック", t_numeric_matcher_non_numeric_fallback)
+    _run_test("numeric: 非数値の無変更は差分なし",       t_numeric_matcher_non_numeric_unchanged)
+    _run_test("numeric: LCS行キーでも型違いを同一視",     t_numeric_matcher_lcs_row_key)
     _run_test("行番号の正確性",                      t_row_numbers)
 
     print()

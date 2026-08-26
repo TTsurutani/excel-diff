@@ -20,6 +20,10 @@
     "old_col": 0,
     "new_col": 1,
     "has_header": true
+  },
+  {
+    "type": "numeric",
+    "column": "I"
   }
 ]
 """
@@ -39,6 +43,7 @@ from openpyxl.utils import column_index_from_string
 # ---------------------------------------------------------------------------
 _MAPPED_SENTINEL = "__excel_diff_mapped__"
 _EQUIV_SENTINEL = "__excel_diff_equiv__"
+_NUMERIC_SENTINEL = "__excel_diff_numeric__"
 
 # column に "*" を指定した場合、シート内の全列に一括適用する
 ALL_COLUMNS = "*"
@@ -149,6 +154,56 @@ class EquivalenceMatcher(ColumnMatcher):
     def normalize_new(self, val: Any) -> Any:
         canon = self._canon(val)
         return (_EQUIV_SENTINEL, canon) if canon is _EQUIV_SENTINEL else val
+
+
+class NumericMatcher(ColumnMatcher):
+    """
+    数値として等価であれば型（int / float / 数字文字列）を問わず同一視する
+    マッチャー（issue #14）。
+
+    old_val・new_val の両方が数値に変換できる場合は float() 変換後の値で
+    比較する（例: 128 と "128" は同一視される）。どちらか一方でも数値に
+    変換できない場合（"-" など）は通常の等値比較にフォールバックする。
+
+    呼び出し元（_cell_equal / _normalize_row_key）で渡される値は既に
+    _normalize_val() を経ている（_x000D_ 除去・改行コード統一・空文字列→None
+    済み）前提のため、このクラス自身では文字列の表記ゆれ吸収は行わない。
+    """
+
+    @staticmethod
+    def _to_float(val: Any) -> Optional[float]:
+        if val is None:
+            return None
+        # bool は int のサブクラスで True==1 / False==0 と評価されるため、
+        # 意図せず数値と一致してしまわないよう明示的に対象外とする。
+        if isinstance(val, bool):
+            return None
+        if isinstance(val, (int, float)):
+            return float(val)
+        if isinstance(val, str):
+            try:
+                return float(val)
+            except ValueError:
+                return None
+        return None
+
+    def matches(self, old_val: Any, new_val: Any) -> bool:
+        old_num = self._to_float(old_val)
+        new_num = self._to_float(new_val)
+        if old_num is not None and new_num is not None:
+            return old_num == new_num
+        # どちらかが数値変換できない場合は通常比較にフォールバック
+        return old_val == new_val
+
+    def _normalize(self, val: Any) -> Any:
+        num = self._to_float(val)
+        return (_NUMERIC_SENTINEL, num) if num is not None else val
+
+    def normalize_old(self, val: Any) -> Any:
+        return self._normalize(val)
+
+    def normalize_new(self, val: Any) -> Any:
+        return self._normalize(val)
 
 
 # ---------------------------------------------------------------------------
@@ -467,6 +522,9 @@ def _parse_matchers(entries: list, base_dir: str) -> list[ColumnMatcher]:
         elif matcher_type == "equivalence":
             values = entry["values"]
             matchers.append(EquivalenceMatcher(col_idx, sheet, values))
+
+        elif matcher_type == "numeric":
+            matchers.append(NumericMatcher(col_idx, sheet))
 
         else:
             raise ValueError(f"未知のマッチャータイプ: {matcher_type!r}")
