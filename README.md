@@ -636,6 +636,20 @@ excel-diff.exe old.xlsx new.xlsx --matchers matchers.json
 
 詳細な優先順位の仕組みは `SPEC.md` の「7-6. マッチャーの優先順位」を参照。
 
+「数値と数字文字列の型違い（例: `128` と `"128"`）を同一視したい」場合は `numeric` タイプを使う。両方の値が数値に変換できれば型を問わず数値として比較し、`"-"` のような非数値はそれぞれ従来通りの通常比較にフォールバックする。`values` は不要。
+
+```json
+{
+  "matchers": [
+    { "type": "numeric", "column": "I", "sheet": "ユーザー(systemuser)" }
+  ]
+}
+```
+
+CRM自動生成データと手動メンテのExcel原本など、由来の異なる2ファイルを比較する際に発生しやすい型違いの疑似差分（[Issue #14](https://github.com/TTsurutani/excel-diff/issues/14)）はこのマッチャーで回避できる。
+
+**注意（既知の制限、[Issue #20](https://github.com/TTsurutani/excel-diff/issues/20)）**: `numeric` は非数値同士のフォールバック比較で `"-"` と空欄（`None`）を同一視**しない**（`equivalence` と違い `values` を持たないため）。特定列の `numeric` ルールを全列適用の `"-"`/`""` 同一視 `equivalence`（`column: "*"`）より前に配置すると、優先順位の仕組み上その列では `"*"` の空欄同一視が効かなくなる。実際に `profiles/matchers.json` のI,J,K,L列は `numeric` を `"*"` より前に置いているため、これらの列で `"-"` と空欄が混在するデータが来ると新たな疑似差分になり得る（現状の実データでは4列とも `"-"` で統一されており未発生）。
+
 ---
 
 ## 内部ロジックのハードコード条件（config非経由）
@@ -648,7 +662,7 @@ excel-diff.exe old.xlsx new.xlsx --matchers matchers.json
 - `--sheet-old`/`--sheet-new` の正規表現が複数シートにマッチした場合、常に先頭の1枚のみを採用し、他のマッチシートは警告のみで無条件に無視する（`excel_diff/reader.py:95-114`）
 - シート名が旧新で異なる場合、シート数が同じなら位置で強制ペア（新側の名前を旧側に統一）、異なれば名前一致優先＋残りを出現順で機械的にペアする、という決め打ちロジックがある（`excel_diff/diff_engine.py:441-466`）
 - ペア候補探索のデフォルト類似度閾値が、関数側 `0.6`（`file_pairing.py:57`）とCLI `--threshold` 引数のデフォルト `0.3`（`__main__.py:80-81`）で不一致のままハードコードされている（既知の技術的負債）
-- 型が違う同値（例: 数値`128`と数字文字列`'128'`）は、値が同じでも**差分ありと判定される**（`excel_diff/diff_engine.py:110` は `==` 比較のため型も一致が必要）。CRM自動生成データと手動メンテのExcel原本など、由来の異なる2ファイルを比較する際に発生しやすい（詳細: [Issue #14](https://github.com/TTsurutani/excel-diff/issues/14)）
+- マッチャー未指定の列では、型が違う同値（例: 数値`128`と数字文字列`'128'`）は、値が同じでも**差分ありと判定される**（`excel_diff/diff_engine.py:118` は `==` 比較のため型も一致が必要）。CRM自動生成データと手動メンテのExcel原本など、由来の異なる2ファイルを比較する際に発生しやすい。該当列に `numeric` マッチャーを指定すれば型違いを同一視できる（[Issue #14](https://github.com/TTsurutani/excel-diff/issues/14) で対応）
 
 ---
 

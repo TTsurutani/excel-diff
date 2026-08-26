@@ -2,6 +2,10 @@
   "matchers": [
     { "type": "equivalence", "column": "H", "values": ["シンプル", "", "-"] },
     { "type": "equivalence", "column": "G", "values": ["テキスト", "", "-", "なし"] },
+    { "type": "numeric", "column": "I" },
+    { "type": "numeric", "column": "J" },
+    { "type": "numeric", "column": "K" },
+    { "type": "numeric", "column": "L" },
     { "type": "equivalence", "column": "*", "values": ["-", ""] }
   ]
 }
