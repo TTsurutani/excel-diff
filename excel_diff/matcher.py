@@ -63,6 +63,17 @@ class ColumnMatcher(ABC):
             return False
         return True
 
+    def can_handle(self, old_val: Any, new_val: Any) -> bool:
+        """
+        このマッチャー本来のロジックで判定できる値の組か（issue #23）。
+
+        ChainMatcher がサブマッチャーを順に試す際に使う。デフォルトは常に
+        True（＝単体使用時は常にこのマッチャーの判定を採用する、従来通り
+        の挙動）。「両方が数値の場合のみ扱える」のように適用条件が限定的な
+        マッチャー（NumericMatcher 等）はオーバーライドする。
+        """
+        return True
+
     @abstractmethod
     def matches(self, old_val: Any, new_val: Any) -> bool:
         """旧値と新値が「等値」とみなせる場合 True を返す。"""
@@ -161,9 +172,13 @@ class NumericMatcher(ColumnMatcher):
     数値として等価であれば型（int / float / 数字文字列）を問わず同一視する
     マッチャー（issue #14）。
 
-    old_val・new_val の両方が数値に変換できる場合は float() 変換後の値で
-    比較する（例: 128 と "128" は同一視される）。どちらか一方でも数値に
-    変換できない場合（"-" など）は通常の等値比較にフォールバックする。
+    old_val・new_val の両方が数値に変換できる場合のみ can_handle() が True
+    を返し、float() 変換後の値同士を比較する（例: 128 と "128" は同一視さ
+    れる）。どちらか一方でも数値に変換できない場合（"-" など）は
+    can_handle() が False を返す — 単体で使う場合は通常の等値比較に
+    フォールバックするが、ChainMatcher 経由で使う場合は次のサブマッチャー
+    （例: equivalence による "-"/空欄 の同一視、issue #20 / #23）に判定を
+    委ねられる。
 
     呼び出し元（_cell_equal / _normalize_row_key）で渡される値は既に
     _normalize_val() を経ている（_x000D_ 除去・改行コード統一・空文字列→None
@@ -187,12 +202,18 @@ class NumericMatcher(ColumnMatcher):
                 return None
         return None
 
+    def can_handle(self, old_val: Any, new_val: Any) -> bool:
+        return (
+            self._to_float(old_val) is not None
+            and self._to_float(new_val) is not None
+        )
+
     def matches(self, old_val: Any, new_val: Any) -> bool:
         old_num = self._to_float(old_val)
         new_num = self._to_float(new_val)
         if old_num is not None and new_num is not None:
             return old_num == new_num
-        # どちらかが数値変換できない場合は通常比較にフォールバック
+        # 単体使用時（ChainMatcher を介さない場合）は通常比較にフォールバック
         return old_val == new_val
 
     def _normalize(self, val: Any) -> Any:
@@ -204,6 +225,58 @@ class NumericMatcher(ColumnMatcher):
 
     def normalize_new(self, val: Any) -> Any:
         return self._normalize(val)
+
+
+class ChainMatcher(ColumnMatcher):
+    """
+    複数のマッチャーを順に試し、最初に can_handle() が True を返した
+    サブマッチャーの matches() / normalize_old() / normalize_new() を
+    採用する合成マッチャー（issue #23）。
+
+    「numeric で扱えない値（"-" など）は equivalence にフォールバックする」
+    といった、独立した複数の関心事を1列に重ねて適用したい場合に使う。
+    NumericMatcher.blank_values（issue #20）のような専用オプションを個別の
+    マッチャー実装に追加していく代わりに、既存のマッチャーをそのまま組み
+    合わせられる。
+
+    どのサブマッチャーも can_handle() が False を返した場合は、最後の
+    サブマッチャーの判定・正規化をそのまま採用する（フォールバック段は
+    常に can_handle=True となる equivalence 等を置く運用を想定）。
+    """
+
+    def __init__(
+        self,
+        column_idx: Any,
+        sheet: Optional[str],
+        sub_matchers: list[ColumnMatcher],
+    ):
+        super().__init__(column_idx, sheet)
+        if not sub_matchers:
+            raise ValueError("ChainMatcher には1つ以上のサブマッチャーが必要です")
+        self.sub_matchers = sub_matchers
+
+    def _select(self, old_val: Any, new_val: Any) -> ColumnMatcher:
+        for m in self.sub_matchers:
+            if m.can_handle(old_val, new_val):
+                return m
+        return self.sub_matchers[-1]
+
+    def can_handle(self, old_val: Any, new_val: Any) -> bool:
+        # chain自体は常に何らかのサブマッチャーへフォールバックできるため True
+        return True
+
+    def matches(self, old_val: Any, new_val: Any) -> bool:
+        return self._select(old_val, new_val).matches(old_val, new_val)
+
+    def normalize_old(self, val: Any) -> Any:
+        # normalize時点では相手側の値が分からないため、can_handle は
+        # 自分自身の値だけで判定できるマッチャー（数値変換可否など）を
+        # 前提とする。old側・new側で選ばれるサブマッチャーが食い違わない
+        # よう、can_handle(val, val) で自己判定する。
+        return self._select(val, val).normalize_old(val)
+
+    def normalize_new(self, val: Any) -> Any:
+        return self._select(val, val).normalize_new(val)
 
 
 # ---------------------------------------------------------------------------
@@ -492,6 +565,52 @@ def _parse_matcher_column(col_spec: Any) -> Any:
     return _parse_column(col_spec)
 
 
+def _build_matcher(
+    entry: dict, col_idx: Any, sheet: Optional[str], base_dir: str
+) -> ColumnMatcher:
+    """
+    1つのマッチャーエントリを ColumnMatcher に変換する。
+    "chain" タイプの "of" 配下エントリの変換にも再帰的に使う（issue #23）。
+    サブエントリに "column"/"sheet" を書く必要はない（chain全体の値を継承）。
+    """
+    matcher_type = entry.get("type", "mapping")
+
+    if matcher_type == "mapping":
+        pairs = [(p[0], p[1]) for p in entry["pairs"]]
+        return MappingMatcher(col_idx, sheet, pairs)
+
+    elif matcher_type == "mapping_file":
+        file_path = entry["file"]
+        old_col = entry.get("old_col", 0)
+        new_col = entry.get("new_col", 1)
+        has_header = entry.get("has_header", False)
+
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in (".xlsx", ".xlsm"):
+            pairs = _load_pairs_from_xlsx(file_path, old_col, new_col, has_header, base_dir)
+        else:
+            pairs = _load_pairs_from_csv(file_path, old_col, new_col, has_header, base_dir)
+
+        return MappingMatcher(col_idx, sheet, pairs)
+
+    elif matcher_type == "equivalence":
+        values = entry["values"]
+        return EquivalenceMatcher(col_idx, sheet, values)
+
+    elif matcher_type == "numeric":
+        return NumericMatcher(col_idx, sheet)
+
+    elif matcher_type == "chain":
+        sub_entries = entry["of"]
+        sub_matchers = [
+            _build_matcher(sub, col_idx, sheet, base_dir) for sub in sub_entries
+        ]
+        return ChainMatcher(col_idx, sheet, sub_matchers)
+
+    else:
+        raise ValueError(f"未知のマッチャータイプ: {matcher_type!r}")
+
+
 def _parse_matchers(entries: list, base_dir: str) -> list[ColumnMatcher]:
     """マッチャーエントリのリストを ColumnMatcher リストに変換する。"""
     matchers: list[ColumnMatcher] = []
@@ -499,35 +618,7 @@ def _parse_matchers(entries: list, base_dir: str) -> list[ColumnMatcher]:
     for entry in entries:
         col_idx = _parse_matcher_column(entry["column"])
         sheet = entry.get("sheet")
-        matcher_type = entry.get("type", "mapping")
-
-        if matcher_type == "mapping":
-            pairs = [(p[0], p[1]) for p in entry["pairs"]]
-            matchers.append(MappingMatcher(col_idx, sheet, pairs))
-
-        elif matcher_type == "mapping_file":
-            file_path = entry["file"]
-            old_col = entry.get("old_col", 0)
-            new_col = entry.get("new_col", 1)
-            has_header = entry.get("has_header", False)
-
-            ext = os.path.splitext(file_path)[1].lower()
-            if ext in (".xlsx", ".xlsm"):
-                pairs = _load_pairs_from_xlsx(file_path, old_col, new_col, has_header, base_dir)
-            else:
-                pairs = _load_pairs_from_csv(file_path, old_col, new_col, has_header, base_dir)
-
-            matchers.append(MappingMatcher(col_idx, sheet, pairs))
-
-        elif matcher_type == "equivalence":
-            values = entry["values"]
-            matchers.append(EquivalenceMatcher(col_idx, sheet, values))
-
-        elif matcher_type == "numeric":
-            matchers.append(NumericMatcher(col_idx, sheet))
-
-        else:
-            raise ValueError(f"未知のマッチャータイプ: {matcher_type!r}")
+        matchers.append(_build_matcher(entry, col_idx, sheet, base_dir))
 
     return matchers
 

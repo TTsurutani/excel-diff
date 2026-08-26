@@ -472,7 +472,7 @@ excel-diff.exe old.xlsx new.xlsx --include-cols "B:U"
 
 | フィールド | 説明 |
 |---|---|
-| `type` | `"mapping"`（インライン）／`"mapping_file"`（外部ファイル）／`"equivalence"`（値集合の同一視）／`"numeric"`（数値/数字文字列の型違いの同一視） |
+| `type` | `"mapping"`（インライン）／`"mapping_file"`（外部ファイル）／`"equivalence"`（値集合の同一視）／`"numeric"`（数値/数字文字列の型違いの同一視）／`"chain"`（複数マッチャーの合成） |
 | `column` | 対象列（Excelの列記号: `"A"`, `"B"` ... または 0始まり整数）。`"*"` を指定するとシート内の全列に一括適用される |
 | `sheet` | 対象シート名（`null` の場合は全シートに適用） |
 | `pairs` | `[旧値, 新値]` のリスト（typeが `mapping` の場合） |
@@ -481,6 +481,7 @@ excel-diff.exe old.xlsx new.xlsx --include-cols "B:U"
 | `new_col` | 対比表の「変換後」列インデックスまたは列名 |
 | `has_header` | 対比ファイルの1行目がヘッダか（デフォルト: `false`） |
 | `values` | 常に同一視する値のリスト（typeが `equivalence` の場合） |
+| `of` | サブマッチャーの定義配列（typeが `chain` の場合。詳細は[7-8](#7-8-chain-タイプ複数マッチャーの合成issue-20--23)） |
 
 ### 7-3. マッチャーの動作（mapping / mapping_file）
 
@@ -557,12 +558,37 @@ excel-diff.exe old.xlsx new.xlsx --include-cols "B:U"
 | `column` | 対象列。`equivalence` 同様 `"*"` で全列一括適用も可能 |
 | `sheet` | 対象シート名（`null` で全シート） |
 
-- `old_val` / `new_val` の両方が `float()` に変換できる場合、変換後の値同士を `==` で比較する（`128` と `"128"` → `128.0 == 128.0` → 同一視）
-- どちらか一方でも数値に変換できない場合（`"-"` など）は通常の等値比較にフォールバックする（従来通り区別される）
+- `old_val` / `new_val` の両方が `float()` に変換できる場合のみ `can_handle()` が `True` を返し、変換後の値同士を `==` で比較する（`128` と `"128"` → `128.0 == 128.0` → 同一視）
+- どちらか一方でも数値に変換できない場合（`"-"` など）は `can_handle()` が `False` を返す。単体で（`chain` を介さずに）使う場合は通常の等値比較にフォールバックする
 - `bool` は `int` のサブクラスで `True == 1` と評価されてしまうため、意図しない一致を避けるためにこのマッチャーの数値変換対象からは除外している（`bool` 値同士は通常比較にフォールバックする）
-- `values` は不要（`equivalence` と異なり同一視する値の集合を指定する必要がない）
 
-**既知の制限（[Issue #20](https://github.com/TTsurutani/excel-diff/issues/20)）**: `numeric` は `"-"` と空欄（`None`）を同一視しない。7-6の優先順位ルールにより、特定列の `numeric` を全列適用（`column: "*"`）の `equivalence`（`"-"`/`""` 同一視）より前に置くと、その列では `"*"` の空欄同一視が効かなくなり、`"-"` と空欄が混在するデータで新たな疑似差分が発生し得る。実運用の `profiles/matchers.json` はI,J,K,L列で `numeric` を `"*"` より前に配置しているため、この制限が該当する。
+### 7-8. chain タイプ（複数マッチャーの合成、issue #20 / #23）
+
+7-6の優先順位ルールにより、特定列の `numeric` を全列適用（`column: "*"`）の `equivalence`（`"-"`/`""` 同一視）より前に置くと、その列では `"*"` の空欄同一視が効かなくなる（Issue #20 で実際に複数シートの疑似差分として発生を確認）。根本原因は「1列につき配列先頭から最初に該当したマッチャーだけを使う」という排他選択の設計にある（Issue #23 参照）。
+
+`chain` は、複数のマッチャーを `of` に列挙し、**順に `can_handle(old_val, new_val)` を試して最初に `True` を返したマッチャーの `matches()`/`normalize_old()`/`normalize_new()` を採用する**合成マッチャーである。
+
+```json
+{
+  "matchers": [
+    { "type": "chain", "column": "I", "of": [
+        { "type": "numeric" },
+        { "type": "equivalence", "values": ["-", ""] }
+    ] }
+  ]
+}
+```
+
+| フィールド | 説明 |
+|---|---|
+| `column` | 対象列 |
+| `sheet` | 対象シート名（`null` で全シート） |
+| `of` | サブマッチャーの定義配列（1つ以上必須）。各要素は通常のマッチャーエントリと同じ形式だが `column`/`sheet` は不要（chain全体の値を継承する） |
+
+- `ColumnMatcher` は `can_handle(old_val, new_val) -> bool` を持つ（デフォルト `True`）。`numeric` はこれをオーバーライドし、両方が数値変換できる場合のみ `True` を返す。`equivalence`/`mapping` はデフォルトのまま（＝常に何らかの判定を返せる）ため、chain の最終段（フォールバック）に置く運用を想定している
+- どのサブマッチャーも `can_handle` が `False` を返すことはない設計が前提（最後の要素は常に `True` を返すマッチャーにする）。全サブマッチャーが `False` の場合は最後の要素の判定を採用する
+- `normalize_old`/`normalize_new`（LCS用キー生成）では、相手側の値がまだ分からないため `can_handle(val, val)` で自己判定してサブマッチャーを選ぶ
+- 実運用の `profiles/matchers.json` はI,J,K,L列（最大文字数・小数点以下の桁数・最小値・最大値）で `numeric` → `equivalence`（`"-"`/`""`同一視）の2段chainを使用している。旧実装（`numeric` 単体＋専用 `blank_values` オプション）と本番データ全量で結果が完全一致することを確認済み
 
 ---
 
