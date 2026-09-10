@@ -1215,6 +1215,41 @@ def t_xlsx_rich_text_char_diff_colors():
     ), f"I列に緑字+太字のrunがない: {list(new_val)!r}"
 
 
+def t_xlsx_control_chars_are_stripped_from_output_xml():
+    """セル値にXMLで不正な制御文字（\\x0b等）が含まれていても、保存されるXMLに
+    そのまま混入しない（Excelが「修復」を要求する破損ファイルを防ぐ回帰テスト）。
+    openpyxlはプレーン文字列には IllegalCharacterError を出すが、CellRichText
+    経由の値はこの検証をすり抜けるため、レンダラー側で明示的にサニタイズする。"""
+    import zipfile
+    import re as _re
+
+    bad_old = CellData("apple\x0bpie")   # \x0b = vertical tab
+    bad_new = CellData("apple\x1fjuice")  # \x1f = unit separator
+    old_row = RowData(row_idx=2, cells=[CellData("K1\x0c"), bad_old])
+    new_row = RowData(row_idx=2, cells=[CellData("K1\x0c"), bad_new])
+    cd = CellDiff(col_idx=1, old_cell=old_row.cells[1], new_cell=new_row.cells[1])
+    rd = RowDiff(RowTag.MODIFY, old_row, new_row, cell_diffs=[cd])
+    sheet = SheetDiff(
+        name="S", status="modified", max_cols=2, col_letters=["A", "B"],
+        key_cols=[0], row_diffs=[rd],
+    )
+    fd = FileDiff(old_path="o.xlsx", new_path="n.xlsx", sheet_diffs=[sheet], has_differences=True)
+
+    wb = xlsx_diff_renderer.render([fd], header_row=0)
+
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        path = f.name
+    try:
+        wb.save(path)  # IllegalCharacterError等が飛ばずに保存できること自体も確認
+        with zipfile.ZipFile(path) as z:
+            xml = z.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        illegal = _re.findall(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", xml)
+        assert not illegal, f"保存XMLに不正な制御文字が残っている: {illegal!r}"
+    finally:
+        os.remove(path)
+
+
 def t_xlsx_no_diff_char_returns_plain_string():
     """文字列自体は完全一致（strikethrough差のみ等）の場合、無駄なリッチテキストにしない。"""
     old_cell = CellData("同じ値")
@@ -1381,6 +1416,7 @@ if __name__ == "__main__":
     _run_test("xlsx: header_row=0は列番号表記",           t_xlsx_header_row_zero_falls_back_to_column_letter)
     _run_test("xlsx: header_row未検出も列番号表記",       t_xlsx_header_not_found_falls_back_to_column_letter)
     _run_test("xlsx: 文字diffの色（赤取消線/緑太字）",     t_xlsx_rich_text_char_diff_colors)
+    _run_test("xlsx: 制御文字は保存XMLから除去される",     t_xlsx_control_chars_are_stripped_from_output_xml)
     _run_test("xlsx: 差分なしはプレーン文字列",           t_xlsx_no_diff_char_returns_plain_string)
     _run_test("xlsx: サブキー救済の主キー列は紫",         t_xlsx_subkey_purple_only_on_key_col)
     _run_test("xlsx: 通常MODIFYは紫にならない",           t_xlsx_normal_modify_no_purple_no_subkey_value)

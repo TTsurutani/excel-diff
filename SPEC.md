@@ -148,6 +148,14 @@ excel-diff.exe --dir <旧フォルダ> <新フォルダ> --key-cols C --excel-su
   かつ `RowDiff.matched_by == "subkey"` の場合のみ、H列・I列を紫背景（`#e8dcff`相当）で
   上書きする（行全体の種類色より優先し、行全体は塗らない）
 
+**XML不正制御文字のサニタイズ:** openpyxlはプレーン文字列セルには
+`ILLEGAL_CHARACTERS_RE`（`\x00-\x08` / `\x0B-\x0C` / `\x0E-\x1F`）による検証があり
+`IllegalCharacterError` を送出するが、`CellRichText`/`TextBlock` 経由の値はこの検証を
+通らず、そのまま壊れたXMLとして書き込まれてしまう（Excel起動時に「修復されたレコード」
+警告が発生する原因）。そのため `xlsx_diff_renderer.py` は全ての出力テキスト
+（A〜G列のプレーン値、H/I列のリッチテキストの各run）に対して、同じ正規表現による
+サニタイズ（該当文字を除去）を明示的に適用する。
+
 **`--header-row N` オプション:**
 
 G列（項目名）のラベル解決にのみ使用し、**差分計算そのものには一切影響しない**

@@ -11,6 +11,7 @@ from difflib import SequenceMatcher
 from typing import Optional
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -48,10 +49,22 @@ _TOP_LEFT = Alignment(horizontal="left", vertical="top", wrap_text=False)
 # ヘルパー: 比較キー・項目名
 # ---------------------------------------------------------------------------
 
+def _sanitize_xml_text(s: str) -> str:
+    """XML 1.0で許可されない制御文字を除去する。
+
+    プレーンなセル値は openpyxl が書き込み時に ILLEGAL_CHARACTERS_RE で検証し
+    IllegalCharacterError を送出するが、CellRichText/TextBlock 経由の値は
+    この検証を通らず、そのまま壊れたXMLとして書き込まれてしまう
+    （Excel起動時に「修復されたレコード」として警告が出る）。
+    そのため本レンダラーでは全ての出力テキストに対して明示的に適用する。
+    """
+    return ILLEGAL_CHARACTERS_RE.sub("", s)
+
+
 def _cell_display(row: Optional[RowData], col_idx: int) -> str:
     if row is None or col_idx >= len(row.cells):
         return ""
-    return row.cells[col_idx].display()
+    return _sanitize_xml_text(row.cells[col_idx].display())
 
 
 def _key_value_str(row: Optional[RowData], cols: list[int]) -> str:
@@ -110,8 +123,8 @@ def _char_diff_runs(
     SequenceMatcher のopcodesロジックは html_renderer._render_cell_pair_diff
     と同一（移植元）。
     """
-    old_str = _strip_ctrl(old_cell.value) if old_cell else ""
-    new_str = _strip_ctrl(new_cell.value) if new_cell else ""
+    old_str = _sanitize_xml_text(_strip_ctrl(old_cell.value) if old_cell else "")
+    new_str = _sanitize_xml_text(_strip_ctrl(new_cell.value) if new_cell else "")
 
     old_runs: list[tuple[str, bool]] = []
     new_runs: list[tuple[str, bool]] = []
@@ -207,6 +220,8 @@ def _write_row(
     （subkey=True の場合はH/I列のみ紫で上書きし、行全体は塗らない）。
     """
     for col_idx, val in enumerate(values, start=1):
+        if isinstance(val, str):
+            val = _sanitize_xml_text(val)
         c = ws.cell(row=row_idx, column=col_idx, value=(val if val != "" else None))
         c.alignment = _TOP_LEFT
         if subkey:
