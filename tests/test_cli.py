@@ -249,6 +249,41 @@ def _unlock_and_remove(path, lock_f):
     os.remove(path)
 
 
+def t_save_workbook_or_raise_fixes_openpyxl_crlf_writing():
+    """openpyxl（3.1.5で確認）はセル値中の \\n を保存時に \\r\\n として書き込んで
+    しまう既知の挙動があり、生の \\r がXMLに残るとOOXMLの往復仕様上不正で、
+    Excel起動時に「修復されたレコード」警告（sheet1.xml内の文字列プロパティ）の
+    原因になる（実運用で発生した不具合の回帰テスト）。_save_workbook_or_raise()
+    が保存後にこれを正規化し、生のXMLに \\r が残らないことを検証する。"""
+    import tempfile
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    import openpyxl
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        path = f.name
+    try:
+        wb = openpyxl.Workbook()
+        wb.active["A1"] = "line1\nline2"  # LFのみ（CRは含めない）でも発生する
+        _save_workbook_or_raise(wb, path, "テスト")
+
+        with zipfile.ZipFile(path) as z:
+            for name in z.namelist():
+                if not name.endswith(".xml"):
+                    continue
+                data = z.read(name)
+                assert b"\r" not in data, f"{name} に生の\\rが残っている"
+                ET.fromstring(data)  # 構文的にも正しいXMLであること
+
+        result = openpyxl.load_workbook(path)
+        assert result.active["A1"].value == "line1\nline2", (
+            f"往復後の値が変化した: {result.active['A1'].value!r}"
+        )
+    finally:
+        os.remove(path)
+
+
 def t_save_workbook_or_raise_wraps_permission_error():
     """保存先が他プロセスで開かれている（PermissionError）場合、原因と対処法を
     含む分かりやすいメッセージに変換して再送出する（生のトレースバックで
@@ -365,6 +400,10 @@ if __name__ == "__main__":
     )
 
     print()
+    _run_test(
+        "保存エラー: openpyxlのCRLF書き込みを正規化",
+        t_save_workbook_or_raise_fixes_openpyxl_crlf_writing,
+    )
     _run_test(
         "保存エラー: PermissionErrorを分かりやすく変換",
         t_save_workbook_or_raise_wraps_permission_error,

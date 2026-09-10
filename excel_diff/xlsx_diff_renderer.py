@@ -222,7 +222,10 @@ def _write_row(
     """
     for col_idx, val in enumerate(values, start=1):
         if isinstance(val, str):
-            val = _sanitize_xml_text(val)
+            # 生の \r / \r\n はXML往復時にパーサーが暗黙的に \n へ正規化してしまい
+            # （OOXMLのST_Xstring往復仕様上は数値文字参照 &#13; でエスケープすべき）、
+            # Excelの検証で「修復」対象になるため、他の列と同様にLFへ正規化する。
+            val = _sanitize_xml_text(_strip_ctrl(val))
         c = ws.cell(row=row_idx, column=col_idx, value=(val if val != "" else None))
         c.alignment = _TOP_LEFT
         if subkey:
