@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import tomllib
 import webbrowser
@@ -223,17 +224,43 @@ def _close_workbook_if_open_in_excel(path: str) -> bool:
         pythoncom.CoUninitialize()
 
 
-def _fix_crlf_in_saved_xlsx(path: str) -> None:
-    """保存済みxlsx内のXMLパートで、セル文字列中の \\r\\n / \\r を \\n に正規化する。
+_T_ELEM_RE = re.compile(rb"<t>([^<]*)</t>")
+_WS_BYTES = (b" ", b"\t", b"\n")
 
-    openpyxl（3.1.5で確認）は、セル値に含まれる \\n を保存時のXMLシリアライズで
-    \\r\\n として書き出してしまう既知の挙動がある。OOXMLのST_Xstring往復仕様上、
-    生の \\r はXMLパーサーが暗黙的に \\n へ正規化してしまうため本来 &#13; で
-    エスケープすべきところであり、これがExcel起動時に「修復されたレコード」
-    警告（sheet1.xml内の文字列プロパティ）の原因になる。
-    本関数はこちら側の入力を既に \\n へ正規化済み（xlsx_diff_renderer._strip_ctrl等）
-    という前提のもと、保存後のXMLに残る \\r をopenpyxl側の副作用とみなして
-    一括で取り除く（構造上の空白に対して行っても実害はない）。
+
+def _add_xml_space_preserve(data: bytes) -> bytes:
+    """`<t>...</t>` の内容が空白文字（半角空白・タブ・LF）で始まる/終わる場合に
+    `xml:space="preserve"` 属性を付与する。
+
+    openpyxl（3.1.5で確認）は、プレーンセル・リッチテキストのrunどちらでも、
+    `<t>` 要素の内容が空白のみ（例: 差分が改行1文字だけの場合の変更run）や
+    前後が空白の場合でも `xml:space="preserve"` を付与しない既知の制限がある。
+    OOXMLの仕様上これが無いと空白を保持できない/文字列プロパティとして
+    不正と判定され、Excel起動時に「修復されたレコード」警告の原因になる。
+    """
+    def repl(m: "re.Match[bytes]") -> bytes:
+        content = m.group(1)
+        if content and (content[:1] in _WS_BYTES or content[-1:] in _WS_BYTES):
+            return b'<t xml:space="preserve">' + content + b"</t>"
+        return m.group(0)
+
+    return _T_ELEM_RE.sub(repl, data)
+
+
+def _fix_crlf_in_saved_xlsx(path: str) -> None:
+    """保存済みxlsx内のXMLパートに対し、openpyxlの既知の書き込み上の問題を
+    後処理で修正する（Excel起動時の「修復されたレコード」警告の回避）。
+
+    1. セル文字列中の \\r\\n / \\r を \\n に正規化する。openpyxl（3.1.5で確認）は、
+       セル値に含まれる \\n を保存時のXMLシリアライズで \\r\\n として書き出して
+       しまう既知の挙動がある。OOXMLのST_Xstring往復仕様上、生の \\r はXML
+       パーサーが暗黙的に \\n へ正規化してしまうため本来 &#13; でエスケープ
+       すべきところであり、これも上記警告の原因になる。
+       本関数はこちら側の入力を既に \\n へ正規化済み（xlsx_diff_renderer._strip_ctrl等）
+       という前提のもと、保存後のXMLに残る \\r をopenpyxl側の副作用とみなして
+       一括で取り除く（構造上の空白に対して行っても実害はない）。
+    2. `<t>` 要素が空白のみ/前後が空白の場合、`xml:space="preserve"` を付与する
+       （`_add_xml_space_preserve()`、上記と同根の別の既知の制限）。
     """
     import io
     import zipfile
@@ -244,8 +271,14 @@ def _fix_crlf_in_saved_xlsx(path: str) -> None:
 
     changed = False
     for name, data in contents.items():
-        if name.endswith(".xml") and b"\r" in data:
-            contents[name] = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        if not name.endswith(".xml"):
+            continue
+        new_data = data
+        if b"\r" in new_data:
+            new_data = new_data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        new_data = _add_xml_space_preserve(new_data)
+        if new_data != data:
+            contents[name] = new_data
             changed = True
 
     if not changed:

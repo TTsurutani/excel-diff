@@ -284,6 +284,47 @@ def t_save_workbook_or_raise_fixes_openpyxl_crlf_writing():
         os.remove(path)
 
 
+def t_save_workbook_or_raise_adds_xml_space_preserve():
+    """`<t>` 要素の内容が空白のみ/前後が空白（例: 差分がLF1文字だけの変更run）の
+    場合、openpyxl（3.1.5で確認）は xml:space="preserve" を付与しない既知の
+    制限があり、Excelが「修復されたレコード」警告を出す原因になる（プレーン
+    セル・リッチテキストのrun両方で発生。実運用で発生した不具合の回帰テスト）。
+    _save_workbook_or_raise() が保存後にこれを補完することを検証する。"""
+    import tempfile
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    import openpyxl
+    from openpyxl.cell.rich_text import CellRichText, TextBlock
+    from openpyxl.cell.text import InlineFont
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        path = f.name
+    try:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "\n"  # プレーンセル: 内容が空白(改行)のみ
+        font = InlineFont(color="CF222E", strike=True)
+        ws["A2"] = CellRichText(["prefix", TextBlock(font, "\n"), "suffix"])
+        _save_workbook_or_raise(wb, path, "テスト")
+
+        with zipfile.ZipFile(path) as z:
+            data = z.read("xl/worksheets/sheet1.xml")
+            ET.fromstring(data)  # 構文的に正しいXMLであること
+            assert b'<t xml:space="preserve">\n</t>' in data, (
+                "xml:space=preserve が付与されていない"
+            )
+
+        result = openpyxl.load_workbook(path, rich_text=True)
+        rws = result.active
+        assert rws["A1"].value == "\n", f"A1の往復後の値が変化した: {rws['A1'].value!r}"
+        assert str(rws["A2"].value) == "prefix\nsuffix", (
+            f"A2の往復後の値が変化した: {rws['A2'].value!r}"
+        )
+    finally:
+        os.remove(path)
+
+
 def t_save_workbook_or_raise_wraps_permission_error():
     """保存先が他プロセスで開かれている（PermissionError）場合、原因と対処法を
     含む分かりやすいメッセージに変換して再送出する（生のトレースバックで
@@ -403,6 +444,10 @@ if __name__ == "__main__":
     _run_test(
         "保存エラー: openpyxlのCRLF書き込みを正規化",
         t_save_workbook_or_raise_fixes_openpyxl_crlf_writing,
+    )
+    _run_test(
+        "保存エラー: 空白のみのrunにxml:space=preserveを付与",
+        t_save_workbook_or_raise_adds_xml_space_preserve,
     )
     _run_test(
         "保存エラー: PermissionErrorを分かりやすく変換",
