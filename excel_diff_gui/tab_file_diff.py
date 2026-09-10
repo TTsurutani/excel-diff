@@ -367,11 +367,12 @@ class TabFileDiff(tk.Frame):
 
         if excel_summary.strip():
             from excel_diff.xlsx_diff_renderer import render as render_xlsx
+            from excel_diff.__main__ import _save_workbook_or_raise
             summary_path = excel_summary.strip()
             wb = render_xlsx(
                 [file_diff], header_row=header_row, sub_key_cols=config.sub_key_cols
             )
-            wb.save(summary_path)
+            _save_workbook_or_raise(wb, summary_path, "集約Excel")
             self._log(f"集約Excel → {summary_path}")
 
         if file_diff.has_differences:

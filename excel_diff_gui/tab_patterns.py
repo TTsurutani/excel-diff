@@ -554,7 +554,9 @@ class TabPatterns(tk.Frame):
         from excel_diff.diff_engine import diff_files
         from excel_diff.html_renderer import render
         from excel_diff.matcher import DiffConfig, parse_col_spec, parse_col_list, load_config
-        from excel_diff.__main__ import _render_index_html, _write_index_xlsx
+        from excel_diff.__main__ import (
+            _render_index_html, _write_index_xlsx, _save_workbook_or_raise,
+        )
 
         sheet_old_pat  = options.get("sheet_old") or None
         sheet_new_pat  = options.get("sheet_new") or None
@@ -666,7 +668,7 @@ class TabPatterns(tk.Frame):
             wb = render_xlsx(
                 all_file_diffs, header_row=header_row, sub_key_cols=config.sub_key_cols
             )
-            wb.save(excel_summary_opt)
+            _save_workbook_or_raise(wb, excel_summary_opt, "集約Excel")
             self._log(f"集約Excel → {excel_summary_opt}")
 
         return index_xlsx_path, skipped

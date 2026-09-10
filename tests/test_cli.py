@@ -13,7 +13,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import argparse
 
-from excel_diff.__main__ import _build_parser, _build_config, _apply_profile, _profiles_dir
+from excel_diff.__main__ import (
+    _build_parser, _build_config, _apply_profile, _profiles_dir,
+    _save_workbook_or_raise, _write_index_xlsx,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +212,130 @@ def t_profile_dir_diff_applies_excel_summary_and_header_row():
 
 
 # ---------------------------------------------------------------------------
+# Excel保存時の PermissionError（他プロセスで開いている場合）ハンドリング
+# ---------------------------------------------------------------------------
+
+def _locked_temp_xlsx_path():
+    """書き込みロックした一時ファイルのパスと、ロック解除用のfileオブジェクトを返す。
+    Windows専用（msvcrt.locking を使用、本ツールはWindows専用のためこれで良い）。"""
+    import msvcrt
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        path = f.name
+    lock_f = open(path, "wb")
+    lock_f.write(b"dummy")
+    lock_f.flush()
+    msvcrt.locking(lock_f.fileno(), msvcrt.LK_NBLCK, 1)
+    return path, lock_f
+
+
+def _unlock_and_remove(path, lock_f):
+    """ロック解除してファイルを削除する。
+
+    _save_workbook_or_raise() は raise ... from first_error で元の例外を連鎖
+    させるため、その中で openpyxl が生成した（クローズに失敗した）ZipFile
+    オブジェクトがトレースバック経由で参照され続け、循環参照GCが走るまで
+    OSファイルハンドルが解放されないことがある（本番のCLI/GUIではエラー後
+    すぐプロセス終了/ログ表示のみのため実害はないが、同一プロセス内で
+    すぐ削除するテストでは gc.collect() で明示的に回収してやる必要がある）。
+    """
+    import gc
+    import msvcrt
+
+    msvcrt.locking(lock_f.fileno(), msvcrt.LK_UNLCK, 1)
+    lock_f.close()
+    gc.collect()
+    os.remove(path)
+
+
+def t_save_workbook_or_raise_wraps_permission_error():
+    """保存先が他プロセスで開かれている（PermissionError）場合、原因と対処法を
+    含む分かりやすいメッセージに変換して再送出する（生のトレースバックで
+    落ちてp-pipeline経由の実行がexit code 1にはなるがメッセージが分かりにくい、
+    という実運用での不具合の回帰テスト）。"""
+    import openpyxl
+
+    path, lock_f = _locked_temp_xlsx_path()
+    try:
+        wb = openpyxl.Workbook()
+
+        def do_save():
+            _save_workbook_or_raise(wb, path, "テストExcel")
+
+        assert_raises(PermissionError, do_save)
+        try:
+            do_save()
+        except PermissionError as e:
+            assert "テストExcel" in str(e), f"ラベルがメッセージに含まれない: {e}"
+            assert "閉じてから再実行" in str(e), f"対処法がメッセージに含まれない: {e}"
+    finally:
+        _unlock_and_remove(path, lock_f)
+
+
+def t_save_workbook_or_raise_closes_open_excel_and_retries():
+    """保存先が起動中のExcelで開かれている場合、自動的に閉じて（保存確認なしで
+    破棄）保存をリトライする。ユーザー要望「ファイルが開いていたら閉じてから
+    再試行してほしい」に対応する回帰テスト。実際にExcelをCOM経由で起動して
+    対象ファイルを開いた状態から検証する。"""
+    import tempfile
+
+    import openpyxl
+    import pythoncom
+    import win32com.client
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        path = os.path.abspath(f.name)
+
+    wb0 = openpyxl.Workbook()
+    wb0.active["A1"] = "original"
+    wb0.save(path)
+
+    pythoncom.CoInitialize()
+    app = None
+    try:
+        app = win32com.client.Dispatch("Excel.Application")
+        app.Visible = False
+        app.Workbooks.Open(path)
+
+        wb_new = openpyxl.Workbook()
+        wb_new.active["A1"] = "new content"
+        _save_workbook_or_raise(wb_new, path, "テストExcel")  # 例外が出ないこと
+
+        result = openpyxl.load_workbook(path)
+        assert result.active["A1"].value == "new content", (
+            f"自動クローズ後の保存内容が反映されていない: {result.active['A1'].value!r}"
+        )
+    finally:
+        try:
+            if app is not None:
+                app.Quit()
+        except Exception:
+            pass  # 最後のブックが閉じた時点でExcel自体が終了している場合がある
+        pythoncom.CoUninitialize()
+        os.remove(path)
+
+
+def t_write_index_xlsx_permission_error_is_friendly():
+    """_write_index_xlsx() 自体も、保存先が他プロセスで開かれている場合に
+    分かりやすいメッセージのPermissionErrorを送出する
+    （実際の障害: p-pipelineでの ★summary.xlsx 保存失敗と同根の箇所）。"""
+    path, lock_f = _locked_temp_xlsx_path()
+    try:
+        def do_write():
+            _write_index_xlsx([], [], "old_dir", "new_dir", path)
+
+        assert_raises(PermissionError, do_write)
+        try:
+            do_write()
+        except PermissionError as e:
+            assert "インデックス" in str(e), f"ラベルがメッセージに含まれない: {e}"
+            assert "閉じてから再実行" in str(e), f"対処法がメッセージに含まれない: {e}"
+    finally:
+        _unlock_and_remove(path, lock_f)
+
+
+# ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
 
@@ -235,6 +362,20 @@ if __name__ == "__main__":
     _run_test(
         "集約Excel: --profile(dir_diff)で反映",
         t_profile_dir_diff_applies_excel_summary_and_header_row,
+    )
+
+    print()
+    _run_test(
+        "保存エラー: PermissionErrorを分かりやすく変換",
+        t_save_workbook_or_raise_wraps_permission_error,
+    )
+    _run_test(
+        "保存エラー: Excelで開いていれば閉じてリトライ",
+        t_save_workbook_or_raise_closes_open_excel_and_retries,
+    )
+    _run_test(
+        "保存エラー: _write_index_xlsxも分かりやすく変換",
+        t_write_index_xlsx_permission_error_is_friendly,
     )
 
     print("=" * 50)

@@ -189,6 +189,72 @@ def _excel_summary_requested(args: argparse.Namespace) -> Optional[str]:
     return str(v)
 
 
+def _close_workbook_if_open_in_excel(path: str) -> bool:
+    """起動中のExcelで path を開いているブックがあれば、保存せずに閉じる。
+
+    閉じられた場合 True、Excelが起動していない・対象ブックが見つからない・
+    pywin32が使えない等の場合は False を返す（呼び出し元は False ならフォール
+    バックの通常エラーにする）。
+    """
+    try:
+        import pythoncom
+        import win32com.client
+    except ImportError:
+        return False
+
+    target = os.path.abspath(path)
+    pythoncom.CoInitialize()
+    try:
+        try:
+            excel = win32com.client.GetActiveObject("Excel.Application")
+        except Exception:
+            return False  # Excelが起動していない
+
+        closed = False
+        for wb_open in list(excel.Workbooks):
+            try:
+                if os.path.abspath(wb_open.FullName) == target:
+                    wb_open.Close(SaveChanges=False)
+                    closed = True
+            except Exception:
+                continue
+        return closed
+    finally:
+        pythoncom.CoUninitialize()
+
+
+def _save_workbook_or_raise(wb, path: str, label: str) -> None:
+    """Workbook を保存する。保存先が別プロセスで開かれていて PermissionError に
+    なった場合、起動中のExcelで開かれているブックであれば自動的に閉じて
+    （保存確認なしで破棄）1回だけ保存を再試行する。それでも失敗する場合や
+    Excel以外のプロセスが握っている場合は、分かりやすいメッセージに変換して
+    PermissionErrorを再送出する。
+
+    CLI側の呼び出し元はこれを捕捉して エラー: 表示 + sys.exit(1) する。GUI側の呼び出し元
+    （ワーカースレッド経由）は捕捉せずそのまま伝播させれば、Worker._loop() が
+    ("err", exc) としてキューに積み、各タブの _poll()/_poll_compare() が
+    str(exc)（＝このメッセージ）をログに表示する。
+    """
+    try:
+        wb.save(path)
+        return
+    except PermissionError as e:
+        first_error = e
+
+    if _close_workbook_if_open_in_excel(path):
+        print(f"（{label}が既にExcelで開かれていたため閉じて保存し直します: {path}）")
+        try:
+            wb.save(path)
+            return
+        except PermissionError as e:
+            first_error = e
+
+    raise PermissionError(
+        f"{label}を保存できません。別のプロセス（Excel等）で開いている"
+        f"可能性があります。閉じてから再実行してください: {path}"
+    ) from first_error
+
+
 def _diff_stats(file_diff) -> tuple[int, int, int]:
     """(削除行数, 追加行数, 変更行数) を返す。"""
     from .diff_engine import RowTag
@@ -402,7 +468,7 @@ def _write_index_xlsx(
     # ---- ウィンドウ固定（ヘッダ行） ----
     ws.freeze_panes = "A11"
 
-    wb.save(out_path)
+    _save_workbook_or_raise(wb, out_path, "インデックス")
 
 
 def _render_index_html(
@@ -887,7 +953,11 @@ def _run_file_diff(args: argparse.Namespace) -> None:
             header_row=args.header_row,
             sub_key_cols=config.sub_key_cols,
         )
-        wb.save(summary_path)
+        try:
+            _save_workbook_or_raise(wb, summary_path, "集約Excel")
+        except PermissionError as e:
+            print(f"エラー: {e}", file=sys.stderr)
+            sys.exit(1)
         print(f"集約Excel → {summary_path}")
 
     print()
@@ -1043,7 +1113,11 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
 
     # インデックスXLSXを生成
     index_xlsx_path = os.path.join(out_dir, "★index.xlsx")
-    _write_index_xlsx(results, unmatched, old_dir, new_dir, index_xlsx_path)
+    try:
+        _write_index_xlsx(results, unmatched, old_dir, new_dir, index_xlsx_path)
+    except PermissionError as e:
+        print(f"エラー: {e}", file=sys.stderr)
+        sys.exit(1)
     print(f"インデックス → {index_xlsx_path}")
 
     # 集約サマリXLSXを生成（--excel-summary 指定時のみ）
@@ -1057,7 +1131,11 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
             header_row=args.header_row,
             sub_key_cols=config.sub_key_cols,
         )
-        wb.save(summary_path)
+        try:
+            _save_workbook_or_raise(wb, summary_path, "集約Excel")
+        except PermissionError as e:
+            print(f"エラー: {e}", file=sys.stderr)
+            sys.exit(1)
         print(f"集約Excel → {summary_path}")
 
     if args.open:
