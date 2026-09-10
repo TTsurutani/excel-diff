@@ -120,7 +120,7 @@ excel-diff.exe --dir <旧フォルダ> <新フォルダ> --key-cols C --excel-su
 | C | シート名 |
 | D | 種類：`追加` / `削除` / `変更` / `シート追加` / `シート削除` |
 | E | 比較キー（`key_cols` の値。複数キー列はカンマ区切りで1セルに結合） |
-| F | 準比較キー（サブキー救済 `RowDiff.matched_by == "subkey"` の行のみ、`sub_key_cols` の値を入れる。通常は空欄） |
+| F | 準比較キー（`--sub-key-cols` 指定時、サブキー救済の有無に関わらず全ての行に値を入れる） |
 | G | 項目（ヘッダー行から解決した列名。解決できない場合は列番号表記、例: `"F"`） |
 | H | 旧項目値（文字単位diffをリッチテキストで表現） |
 | I | 新項目値（文字単位diffをリッチテキストで表現） |
@@ -129,7 +129,7 @@ excel-diff.exe --dir <旧フォルダ> <新フォルダ> --key-cols C --excel-su
 
 - EQUAL行（変更なし）は出力しない
 - 行単位の追加・削除（`RowTag.DELETE` / `RowTag.INSERT`）: 1差分＝1行。種類・比較キー・
-  準比較キー（常に空欄）列のみ埋め、項目・旧項目値・新項目値は空欄
+  準比較キー列のみ埋め、項目・旧項目値・新項目値は空欄
 - シート丸ごと追加・削除（`SheetDiff.status in ("added", "deleted")`）: シート内の行を
   1行ずつ列挙せず、要約1行のみ出力。他の列（比較キー〜新項目値）は空欄
 - 変更（`RowTag.MODIFY`）: **1変更セル（`CellDiff` 1件）＝1行**。同一行内で複数列が
@@ -138,7 +138,8 @@ excel-diff.exe --dir <旧フォルダ> <新フォルダ> --key-cols C --excel-su
 **色・書式ルール（HTML版 `html_renderer.py` の配色を流用）:**
 
 - 行全体の背景色: 追加・シート追加＝薄緑（`#e6ffed`相当）、削除・シート削除＝薄赤
-  （`#ffeef0`相当）、変更＝薄黄（`#fff8c5`相当）
+  （`#ffeef0`相当）。**変更行は行全体の背景色を付けない**（視認性がうるさいとの
+  ユーザー確定により、H/I列の文字色分けと紫背景のみで示す）
 - 文字単位のdiff（`SequenceMatcher` のopcodesを `html_renderer._render_cell_pair_diff` と
   同じロジックで計算し、openpyxlの `CellRichText`/`TextBlock`/`InlineFont` で表現）:
   H列は削除された文字部分のみ赤字＋取り消し線、I列は追加された文字部分のみ緑字＋太字

@@ -1261,7 +1261,8 @@ def t_xlsx_no_diff_char_returns_plain_string():
 
 def t_xlsx_subkey_purple_only_on_key_col():
     """サブキー救済ペアでは主キー列の変更行のみH/I列が紫背景になり、行全体は塗られない。
-    通常データ列の変更行は従来通り行全体が変更色（黄）になる。"""
+    通常データ列の変更行は行全体の背景色を付けない（変更行は無色でユーザー確定済み）。
+    同じ行ペア（同一RowDiff）に属する行はF列（準比較キー）が両方とも埋まる。"""
     old_row = RowData(row_idx=2, cells=[CellData("K2"), CellData("x")])
     new_row = RowData(row_idx=2, cells=[CellData("K9"), CellData("y")])
     cd_key = CellDiff(col_idx=0, old_cell=old_row.cells[0], new_cell=new_row.cells[0])
@@ -1283,19 +1284,21 @@ def t_xlsx_subkey_purple_only_on_key_col():
     other_row = rows[1]  # col_idx=1（通常列）の変更行
 
     PURPLE = "FFE8DCFF"
-    YELLOW = "FFFFF8C5"
 
     assert key_row[7].fill.fgColor.rgb == PURPLE, "主キー列変更行のH列が紫でない"
     assert key_row[8].fill.fgColor.rgb == PURPLE, "主キー列変更行のI列が紫でない"
-    assert key_row[3].fill.fgColor.rgb != PURPLE, "主キー列変更行のD列(行全体)が塗られている"
+    assert key_row[3].fill.fill_type is None, "主キー列変更行のD列(行全体)が塗られている"
     assert key_row[5].value == "x", f"F列(準比較キー)がsub_key_colsの値でない: {key_row[5].value!r}"
 
-    assert other_row[7].fill.fgColor.rgb == YELLOW, "通常列変更行のH列が変更色でない"
-    assert other_row[3].fill.fgColor.rgb == YELLOW, "通常列変更行のD列(行全体)が変更色でない"
+    assert other_row[7].fill.fill_type is None, "通常列変更行のH列に背景色が付いている"
+    assert other_row[3].fill.fill_type is None, "通常列変更行のD列(行全体)に背景色が付いている"
+    assert other_row[5].value == "x", "同じ行ペアなのに通常列側のF列が埋まっていない"
 
 
-def t_xlsx_normal_modify_no_purple_no_subkey_value():
-    """通常のMODIFY（matched_by未設定）ではF列は空欄、H/I列も紫にならない。"""
+def t_xlsx_normal_modify_no_purple_but_subkey_value_always_filled():
+    """通常のMODIFY（matched_by未設定＝サブキー救済されていない行）でも、
+    --sub-key-cols 指定時はF列（準比較キー）が漏れなく埋まる（ユーザー要望により、
+    サブキー救済の有無に関わらず常に編集する仕様に変更）。H/I列は紫にならない。"""
     old_row = RowData(row_idx=2, cells=[CellData("A"), CellData("old")])
     new_row = RowData(row_idx=2, cells=[CellData("A"), CellData("new")])
     cd = CellDiff(col_idx=1, old_cell=old_row.cells[1], new_cell=new_row.cells[1])
@@ -1308,9 +1311,48 @@ def t_xlsx_normal_modify_no_purple_no_subkey_value():
     wb = xlsx_diff_renderer.render([fd], header_row=0, sub_key_cols=[1])
     ws = wb.active
     row = list(ws.iter_rows(min_row=2))[0]
-    assert row[5].value is None, "matched_by無しなのにF列(準比較キー)が埋まっている"
-    assert row[7].fill.fgColor.rgb == "FFFFF8C5"
-    assert row[8].fill.fgColor.rgb == "FFFFF8C5"
+    assert row[5].value == "old", f"matched_by無しでもF列(準比較キー)が埋まるべき: {row[5].value!r}"
+    assert row[7].fill.fill_type is None, "通常の変更行H列に背景色が付いている"
+    assert row[8].fill.fill_type is None, "通常の変更行I列に背景色が付いている"
+
+
+def t_xlsx_row_delete_insert_subkey_value_filled():
+    """行単位の削除・追加でも --sub-key-cols 指定時はF列が埋まる
+    （追加/削除はサブキー救済の対象にならないが、F列自体は他の行と同様に埋める）。"""
+    old_row = make_sheet("S", [["K1", "subA"]]).rows[0]
+    new_row = make_sheet("S", [["K2", "subB"]]).rows[0]
+    sheet = SheetDiff(
+        name="Sheet1", status="modified", max_cols=2, col_letters=["A", "B"],
+        key_cols=[0],
+        row_diffs=[
+            RowDiff(RowTag.DELETE, old_row=old_row),
+            RowDiff(RowTag.INSERT, new_row=new_row),
+        ],
+    )
+    fd = FileDiff(old_path="o.xlsx", new_path="n.xlsx", sheet_diffs=[sheet], has_differences=True)
+    wb = xlsx_diff_renderer.render([fd], header_row=0, sub_key_cols=[1])
+    ws = wb.active
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
+    assert rows[0][5] == "subA", f"削除行のF列(準比較キー)が埋まっていない: {rows[0][5]!r}"
+    assert rows[1][5] == "subB", f"追加行のF列(準比較キー)が埋まっていない: {rows[1][5]!r}"
+
+
+def t_xlsx_modify_row_has_no_background_fill():
+    """変更行は種類に関わらず行全体の背景色を付けない（黄色背景の廃止）。"""
+    old_row = RowData(row_idx=2, cells=[CellData("K1"), CellData("old")])
+    new_row = RowData(row_idx=2, cells=[CellData("K1"), CellData("new")])
+    cd = CellDiff(col_idx=1, old_cell=old_row.cells[1], new_cell=new_row.cells[1])
+    rd = RowDiff(RowTag.MODIFY, old_row, new_row, cell_diffs=[cd])
+    sheet = SheetDiff(
+        name="S", status="modified", max_cols=2, col_letters=["A", "B"],
+        key_cols=[0], row_diffs=[rd],
+    )
+    fd = FileDiff(old_path="o.xlsx", new_path="n.xlsx", sheet_diffs=[sheet], has_differences=True)
+    wb = xlsx_diff_renderer.render([fd], header_row=0)
+    ws = wb.active
+    row = list(ws.iter_rows(min_row=2))[0]
+    for cell in row:
+        assert cell.fill.fill_type is None, f"変更行に背景色が付いている: 列{cell.column}"
 
 
 # ---------------------------------------------------------------------------
@@ -1419,7 +1461,12 @@ if __name__ == "__main__":
     _run_test("xlsx: 制御文字は保存XMLから除去される",     t_xlsx_control_chars_are_stripped_from_output_xml)
     _run_test("xlsx: 差分なしはプレーン文字列",           t_xlsx_no_diff_char_returns_plain_string)
     _run_test("xlsx: サブキー救済の主キー列は紫",         t_xlsx_subkey_purple_only_on_key_col)
-    _run_test("xlsx: 通常MODIFYは紫にならない",           t_xlsx_normal_modify_no_purple_no_subkey_value)
+    _run_test(
+        "xlsx: 通常MODIFYもF列は常に埋まる",
+        t_xlsx_normal_modify_no_purple_but_subkey_value_always_filled,
+    )
+    _run_test("xlsx: 削除/追加行もF列が埋まる",           t_xlsx_row_delete_insert_subkey_value_filled)
+    _run_test("xlsx: 変更行は背景色を付けない",           t_xlsx_modify_row_has_no_background_fill)
 
     print("=" * 50)
     print(f"結果: {len(PASS)} PASS / {len(FAIL)} FAIL")

@@ -33,9 +33,10 @@ _HEADERS = [
 _COL_WIDTHS = [40, 40, 16, 10, 14, 14, 18, 40, 40]
 
 # HTML版 (html_renderer.py) の配色を流用し、HTMLとExcelで見た目の一貫性を保つ。
+# 変更（MODIFY）行は行全体の背景色を付けない（うるさいためユーザー確定済み）。
+# H/I列のリッチテキスト色分けと、サブキー救済ペアの紫背景のみで変更箇所を示す。
 _FILL_ADD = PatternFill("solid", fgColor="FFE6FFED")     # .row-inserted td
 _FILL_DEL = PatternFill("solid", fgColor="FFFFEEF0")     # .row-deleted td
-_FILL_MOD = PatternFill("solid", fgColor="FFFFF8C5")     # .cell-modified
 _FILL_SUBKEY = PatternFill("solid", fgColor="FFE8DCFF")  # .cell-modified-subkey
 _FILL_HEADER = PatternFill("solid", fgColor="FF1F3864")
 
@@ -291,10 +292,11 @@ def render(
                     fill = _FILL_DEL if is_delete else _FILL_ADD
                     src_row = rd.old_row if is_delete else rd.new_row
                     key_val = _key_value_str(src_row, key_cols)
+                    sub_key_val = _key_value_str(src_row, sub_key_cols)
                     _write_row(
                         ws, row_idx,
                         [old_path, new_path, sheet_diff.name, kind,
-                         key_val, "", "", "", ""],
+                         key_val, sub_key_val, "", "", ""],
                         fill,
                     )
                     row_idx += 1
@@ -305,13 +307,13 @@ def render(
                     _key_value_str(rd.old_row, key_cols)
                     or _key_value_str(rd.new_row, key_cols)
                 )
+                # 準比較キー（F列）は --sub-key-cols 指定時、サブキー救済の有無に
+                # 関わらず全ての変更行に値を入れる（ユーザー確定済み）。
+                sub_key_val = (
+                    _key_value_str(rd.old_row, sub_key_cols)
+                    or _key_value_str(rd.new_row, sub_key_cols)
+                )
                 is_subkey_row = rd.matched_by == "subkey"
-                sub_key_val = ""
-                if is_subkey_row:
-                    sub_key_val = (
-                        _key_value_str(rd.old_row, sub_key_cols)
-                        or _key_value_str(rd.new_row, sub_key_cols)
-                    )
 
                 for cd in rd.cell_diffs:
                     item_label = _header_label(header_labels, cd.col_idx)
@@ -321,7 +323,7 @@ def render(
                         ws, row_idx,
                         [old_path, new_path, sheet_diff.name, "変更", key_val,
                          sub_key_val, item_label, old_val, new_val],
-                        _FILL_MOD,
+                        None,
                         subkey=is_purple,
                     )
                     row_idx += 1
