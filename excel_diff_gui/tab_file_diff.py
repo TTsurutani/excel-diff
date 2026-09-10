@@ -32,6 +32,8 @@ class TabFileDiff(tk.Frame):
         self._strike  = tk.BooleanVar(value=cfg.get("file_diff", "strikethrough"))
         self._open_br = tk.BooleanVar(value=cfg.get("file_diff", "open_browser"))
         self._mode    = tk.StringVar(value=cfg.get("file_diff", "diff_mode", "lcs"))
+        self._excel_summary = tk.StringVar(value=cfg.get("file_diff", "excel_summary", ""))
+        self._header_row = tk.StringVar(value=str(cfg.get("file_diff", "header_row", 1)))
 
         self._opt_built = False
         self._opt_open  = False
@@ -163,6 +165,20 @@ class TabFileDiff(tk.Frame):
             filetypes=[("JSON", "*.json"), ("All", "*.*")],
         ).pack(fill="x", **pad)
 
+        FileSelectRow(
+            g, "集約Excel", self._excel_summary,
+            filetypes=[("Excel", "*.xlsx"), ("All", "*.*")],
+        ).pack(fill="x", **pad)
+
+        fr_hr = tk.Frame(g)
+        fr_hr.pack(fill="x", **pad)
+        tk.Label(fr_hr, text="ヘッダー行", width=14, anchor="w").pack(side="left")
+        tk.Entry(fr_hr, textvariable=self._header_row, width=6).pack(side="left")
+        tk.Label(
+            fr_hr, text="集約Excelの項目名解決に使用。1始まり、0=ヘッダーなし",
+            fg="gray",
+        ).pack(side="left", padx=4)
+
         tk.Checkbutton(
             g, text="取り消し線も差分として扱う", variable=self._strike,
         ).pack(anchor="w", **pad)
@@ -187,7 +203,15 @@ class TabFileDiff(tk.Frame):
             "diff_mode":     self._mode.get(),
             "key_cols":      self._key_cols.get(),
             "sub_key_cols":  self._sub_key_cols.get(),
+            "excel_summary": self._excel_summary.get(),
+            "header_row":    self._get_header_row(),
         }
+
+    def _get_header_row(self) -> int:
+        try:
+            return int(self._header_row.get().strip() or "1")
+        except ValueError:
+            return 1
 
     def load_from_snapshot(self, snap: dict) -> None:
         """スナップショットの値を各変数に反映する（プロファイル読み込み用）。"""
@@ -202,6 +226,7 @@ class TabFileDiff(tk.Frame):
             "key_cols":   self._key_cols,
             "sub_key_cols": self._sub_key_cols,
             "diff_mode":  self._mode,
+            "excel_summary": self._excel_summary,
         }
         for key, var in mapping.items():
             if key in snap:
@@ -210,6 +235,8 @@ class TabFileDiff(tk.Frame):
             self._strike.set(bool(snap["strikethrough"]))
         if "open_browser" in snap:
             self._open_br.set(bool(snap["open_browser"]))
+        if "header_row" in snap:
+            self._header_row.set(str(int(snap["header_row"])))
         self._on_mode()
 
     def save_state(self) -> None:
@@ -233,20 +260,14 @@ class TabFileDiff(tk.Frame):
         if self._mode.get() == "key" and not self._key_cols.get().strip():
             messagebox.showerror("エラー", "キーJOINモード: キー列を指定してください")
             return
+        if self._excel_summary.get().strip() and self._mode.get() != "key":
+            messagebox.showerror(
+                "エラー",
+                "集約Excelを使うにはキーJOINモード（キー列指定）が必要です",
+            )
+            return
 
-        cfg.set_tab("file_diff", {
-            "old_file":  old, "new_file": new,
-            "output":    self._out.get(),
-            "sheet_old": self._sheet_old.get(),
-            "sheet_new": self._sheet_new.get(),
-            "include_cols": self._cols.get(),
-            "matchers":  self._matchers.get(),
-            "strikethrough": self._strike.get(),
-            "open_browser":  self._open_br.get(),
-            "diff_mode": self._mode.get(),
-            "key_cols":  self._key_cols.get(),
-            "sub_key_cols": self._sub_key_cols.get(),
-        })
+        cfg.set_tab("file_diff", self.get_snapshot())
         cfg.save()
 
         self._btn_run.config(state="disabled", text="実行中...")
@@ -261,6 +282,7 @@ class TabFileDiff(tk.Frame):
             self._strike.get(), self._mode.get(),
             self._key_cols.get().strip(), self._sub_key_cols.get().strip(),
             self._open_br.get(),
+            self._excel_summary.get().strip(), self._get_header_row(),
         )
         self.after(100, self._poll)
 
@@ -279,6 +301,7 @@ class TabFileDiff(tk.Frame):
         self, old_file, new_file, output, sheet_old, sheet_new, include_cols,
         matchers_file, strikethrough, diff_mode, key_cols_str,
         sub_key_cols_str, open_browser,
+        excel_summary="", header_row=1,
     ) -> None:
         from excel_diff.reader import read_workbook, filter_sheets_by_pattern
         from excel_diff.diff_engine import diff_files, RowTag
@@ -341,6 +364,15 @@ class TabFileDiff(tk.Frame):
 
         out_path = output or str(Path(new_file).parent / f"{Path(new_file).stem}_diff.html")
         Path(out_path).write_text(render(file_diff), encoding="utf-8")
+
+        if excel_summary.strip():
+            from excel_diff.xlsx_diff_renderer import render as render_xlsx
+            summary_path = excel_summary.strip()
+            wb = render_xlsx(
+                [file_diff], header_row=header_row, sub_key_cols=config.sub_key_cols
+            )
+            wb.save(summary_path)
+            self._log(f"集約Excel → {summary_path}")
 
         if file_diff.has_differences:
             delete = sum(1 for sd in file_diff.sheet_diffs

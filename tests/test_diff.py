@@ -25,7 +25,8 @@ from excel_diff.matcher import (
     load_config,
 )
 from excel_diff.html_renderer import _render_cell_pair_diff, _render_row_pair
-from excel_diff.diff_engine import RowDiff, CellDiff
+from excel_diff.diff_engine import RowDiff, CellDiff, SheetDiff, FileDiff
+from excel_diff import xlsx_diff_renderer
 
 
 # ---------------------------------------------------------------------------
@@ -1081,6 +1082,203 @@ def t_normal_modify_row_has_no_subkey_class():
 
 
 # ---------------------------------------------------------------------------
+# xlsx_diff_renderer（集約Excel出力）
+# ---------------------------------------------------------------------------
+
+def t_xlsx_equal_sheet_skipped():
+    """status=='equal' のシートは出力行を生成しない（ヘッダー行のみ）。"""
+    sheet = SheetDiff(name="Eq", status="equal", max_cols=1, col_letters=["A"])
+    fd = FileDiff(old_path="o.xlsx", new_path="n.xlsx", sheet_diffs=[sheet])
+    wb = xlsx_diff_renderer.render([fd])
+    ws = wb.active
+    assert ws.max_row == 1, f"equalシートなのに行が出力された: max_row={ws.max_row}"
+
+
+def t_xlsx_sheet_added_deleted_summary_row():
+    """シート丸ごと追加・削除は要約1行のみ。種類列以外(E〜I)は空欄。"""
+    added = SheetDiff(name="New", status="added", max_cols=2, col_letters=["A", "B"])
+    deleted = SheetDiff(name="Old", status="deleted", max_cols=2, col_letters=["A", "B"])
+    fd = FileDiff(
+        old_path="o.xlsx", new_path="n.xlsx",
+        sheet_diffs=[added, deleted], has_differences=True,
+    )
+    wb = xlsx_diff_renderer.render([fd])
+    ws = wb.active
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
+    assert len(rows) == 2, f"要約行数が想定と異なる: {rows}"
+    assert rows[0][2] == "New" and rows[0][3] == "シート追加"
+    assert rows[0][4] is None, f"E列が空欄でない: {rows[0]}"
+    assert rows[1][2] == "Old" and rows[1][3] == "シート削除"
+
+
+def t_xlsx_row_delete_insert_key_only():
+    """行単位の削除・追加は1行ずつ。E列(比較キー)のみ埋まり、F〜I列は空欄。"""
+    old_row = make_sheet("S", [["K1", "x"]]).rows[0]
+    new_row = make_sheet("S", [["K2", "y"]]).rows[0]
+    sheet = SheetDiff(
+        name="Sheet1", status="modified", max_cols=2, col_letters=["A", "B"],
+        key_cols=[0],
+        row_diffs=[
+            RowDiff(RowTag.DELETE, old_row=old_row),
+            RowDiff(RowTag.INSERT, new_row=new_row),
+        ],
+    )
+    fd = FileDiff(old_path="o.xlsx", new_path="n.xlsx", sheet_diffs=[sheet], has_differences=True)
+    wb = xlsx_diff_renderer.render([fd], header_row=0)
+    ws = wb.active
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
+    assert len(rows) == 2
+
+    assert rows[0][3] == "削除" and rows[0][4] == "K1"
+    assert rows[0][5] is None and rows[0][6] is None
+    assert rows[0][7] is None and rows[0][8] is None
+
+    assert rows[1][3] == "追加" and rows[1][4] == "K2"
+    assert rows[1][5] is None and rows[1][6] is None
+    assert rows[1][7] is None and rows[1][8] is None
+
+
+def t_xlsx_modify_splits_per_cell_and_resolves_header():
+    """MODIFYは1 CellDiff=1行に分かれ、G列は header_row から解決される。"""
+    header_row_data = make_sheet("S", [["ID", "Name", "Val"]]).rows[0]  # row_idx=1
+    old_row = RowData(row_idx=2, cells=[CellData("K1"), CellData("apple"), CellData("100")])
+    new_row = RowData(row_idx=2, cells=[CellData("K1"), CellData("apple2"), CellData("150")])
+    cd_name = CellDiff(col_idx=1, old_cell=old_row.cells[1], new_cell=new_row.cells[1])
+    cd_val = CellDiff(col_idx=2, old_cell=old_row.cells[2], new_cell=new_row.cells[2])
+    header_rd = RowDiff(RowTag.EQUAL, header_row_data, header_row_data)
+    modify_rd = RowDiff(RowTag.MODIFY, old_row, new_row, cell_diffs=[cd_name, cd_val])
+    sheet = SheetDiff(
+        name="S", status="modified", max_cols=3, col_letters=["A", "B", "C"],
+        key_cols=[0], row_diffs=[header_rd, modify_rd],
+    )
+    fd = FileDiff(old_path="o.xlsx", new_path="n.xlsx", sheet_diffs=[sheet], has_differences=True)
+    wb = xlsx_diff_renderer.render([fd], header_row=1)
+    ws = wb.active
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
+    assert len(rows) == 2, f"1 CellDiff=1行になっていない: {rows}"
+    assert rows[0][4] == "K1" and rows[0][6] == "Name"
+    assert rows[1][4] == "K1" and rows[1][6] == "Val"
+
+
+def t_xlsx_header_row_zero_falls_back_to_column_letter():
+    """header_row=0（ヘッダーなし扱い）のとき、G列は列番号表記になる。"""
+    old_row = RowData(row_idx=2, cells=[CellData("K1"), CellData("a")])
+    new_row = RowData(row_idx=2, cells=[CellData("K1"), CellData("b")])
+    cd = CellDiff(col_idx=1, old_cell=old_row.cells[1], new_cell=new_row.cells[1])
+    rd = RowDiff(RowTag.MODIFY, old_row, new_row, cell_diffs=[cd])
+    sheet = SheetDiff(
+        name="S", status="modified", max_cols=2, col_letters=["A", "B"],
+        key_cols=[0], row_diffs=[rd],
+    )
+    fd = FileDiff(old_path="o.xlsx", new_path="n.xlsx", sheet_diffs=[sheet], has_differences=True)
+    wb = xlsx_diff_renderer.render([fd], header_row=0)
+    ws = wb.active
+    row = list(ws.iter_rows(min_row=2, values_only=True))[0]
+    assert row[6] == "B", f"列番号表記へのフォールバックが働かない: {row[6]!r}"
+
+
+def t_xlsx_header_not_found_falls_back_to_column_letter():
+    """header_row を指定してもシート内にその行が存在しない場合、列番号表記になる。"""
+    old_row = RowData(row_idx=2, cells=[CellData("K1"), CellData("a")])
+    new_row = RowData(row_idx=2, cells=[CellData("K1"), CellData("b")])
+    cd = CellDiff(col_idx=1, old_cell=old_row.cells[1], new_cell=new_row.cells[1])
+    rd = RowDiff(RowTag.MODIFY, old_row, new_row, cell_diffs=[cd])
+    sheet = SheetDiff(
+        name="S", status="modified", max_cols=2, col_letters=["A", "B"],
+        key_cols=[0], row_diffs=[rd],
+    )
+    fd = FileDiff(old_path="o.xlsx", new_path="n.xlsx", sheet_diffs=[sheet], has_differences=True)
+    wb = xlsx_diff_renderer.render([fd], header_row=5)  # シート内に row_idx==5 の行はない
+    ws = wb.active
+    row = list(ws.iter_rows(min_row=2, values_only=True))[0]
+    assert row[6] == "B"
+
+
+def t_xlsx_rich_text_char_diff_colors():
+    """H列は変更部分が赤字+取り消し線、I列は変更部分が緑字+太字のリッチテキストになる。"""
+    from openpyxl.cell.rich_text import CellRichText, TextBlock
+
+    old_cell = CellData("apple100")
+    new_cell = CellData("apple150")
+    old_val, new_val = xlsx_diff_renderer._render_cell_pair_rich(old_cell, new_cell)
+
+    assert isinstance(old_val, CellRichText), f"H列がリッチテキストでない: {old_val!r}"
+    assert any(
+        isinstance(b, TextBlock) and b.font.color.rgb.endswith("CF222E") and b.font.strike
+        for b in old_val
+    ), f"H列に赤字+取り消し線のrunがない: {list(old_val)!r}"
+
+    assert isinstance(new_val, CellRichText), f"I列がリッチテキストでない: {new_val!r}"
+    assert any(
+        isinstance(b, TextBlock) and b.font.color.rgb.endswith("1A7F37") and b.font.b
+        for b in new_val
+    ), f"I列に緑字+太字のrunがない: {list(new_val)!r}"
+
+
+def t_xlsx_no_diff_char_returns_plain_string():
+    """文字列自体は完全一致（strikethrough差のみ等）の場合、無駄なリッチテキストにしない。"""
+    old_cell = CellData("同じ値")
+    new_cell = CellData("同じ値")
+    old_val, new_val = xlsx_diff_renderer._render_cell_pair_rich(old_cell, new_cell)
+    assert old_val == "同じ値" and isinstance(old_val, str)
+    assert new_val == "同じ値" and isinstance(new_val, str)
+
+
+def t_xlsx_subkey_purple_only_on_key_col():
+    """サブキー救済ペアでは主キー列の変更行のみH/I列が紫背景になり、行全体は塗られない。
+    通常データ列の変更行は従来通り行全体が変更色（黄）になる。"""
+    old_row = RowData(row_idx=2, cells=[CellData("K2"), CellData("x")])
+    new_row = RowData(row_idx=2, cells=[CellData("K9"), CellData("y")])
+    cd_key = CellDiff(col_idx=0, old_cell=old_row.cells[0], new_cell=new_row.cells[0])
+    cd_other = CellDiff(col_idx=1, old_cell=old_row.cells[1], new_cell=new_row.cells[1])
+    rd = RowDiff(
+        RowTag.MODIFY, old_row, new_row,
+        cell_diffs=[cd_key, cd_other], matched_by="subkey",
+    )
+    sheet = SheetDiff(
+        name="S", status="modified", max_cols=2, col_letters=["A", "B"],
+        key_cols=[0], row_diffs=[rd],
+    )
+    fd = FileDiff(old_path="o.xlsx", new_path="n.xlsx", sheet_diffs=[sheet], has_differences=True)
+    wb = xlsx_diff_renderer.render([fd], header_row=0, sub_key_cols=[1])
+    ws = wb.active
+    rows = list(ws.iter_rows(min_row=2))
+
+    key_row = rows[0]   # col_idx=0（主キー列）の変更行
+    other_row = rows[1]  # col_idx=1（通常列）の変更行
+
+    PURPLE = "FFE8DCFF"
+    YELLOW = "FFFFF8C5"
+
+    assert key_row[7].fill.fgColor.rgb == PURPLE, "主キー列変更行のH列が紫でない"
+    assert key_row[8].fill.fgColor.rgb == PURPLE, "主キー列変更行のI列が紫でない"
+    assert key_row[3].fill.fgColor.rgb != PURPLE, "主キー列変更行のD列(行全体)が塗られている"
+    assert key_row[5].value == "x", f"F列(準比較キー)がsub_key_colsの値でない: {key_row[5].value!r}"
+
+    assert other_row[7].fill.fgColor.rgb == YELLOW, "通常列変更行のH列が変更色でない"
+    assert other_row[3].fill.fgColor.rgb == YELLOW, "通常列変更行のD列(行全体)が変更色でない"
+
+
+def t_xlsx_normal_modify_no_purple_no_subkey_value():
+    """通常のMODIFY（matched_by未設定）ではF列は空欄、H/I列も紫にならない。"""
+    old_row = RowData(row_idx=2, cells=[CellData("A"), CellData("old")])
+    new_row = RowData(row_idx=2, cells=[CellData("A"), CellData("new")])
+    cd = CellDiff(col_idx=1, old_cell=old_row.cells[1], new_cell=new_row.cells[1])
+    rd = RowDiff(RowTag.MODIFY, old_row, new_row, cell_diffs=[cd])
+    sheet = SheetDiff(
+        name="S", status="modified", max_cols=2, col_letters=["A", "B"],
+        key_cols=[0], row_diffs=[rd],
+    )
+    fd = FileDiff(old_path="o.xlsx", new_path="n.xlsx", sheet_diffs=[sheet], has_differences=True)
+    wb = xlsx_diff_renderer.render([fd], header_row=0, sub_key_cols=[1])
+    ws = wb.active
+    row = list(ws.iter_rows(min_row=2))[0]
+    assert row[5].value is None, "matched_by無しなのにF列(準比較キー)が埋まっている"
+    assert row[7].fill.fgColor.rgb == "FFFFF8C5"
+    assert row[8].fill.fgColor.rgb == "FFFFF8C5"
+
+
+# ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
 
@@ -1173,6 +1371,19 @@ if __name__ == "__main__":
     _run_test("特殊: 同一値（markなし）",             t_char_same_value)
     _run_test("全角数字変更",                        t_char_zenkaku_numbers)
     _run_test("混在: 日付文字列",                     t_char_mixed_date)
+
+    print()
+    print("--- xlsx_diff_renderer（集約Excel） ---")
+    _run_test("xlsx: equalシートは出力なし",              t_xlsx_equal_sheet_skipped)
+    _run_test("xlsx: シート追加削除は要約1行",            t_xlsx_sheet_added_deleted_summary_row)
+    _run_test("xlsx: 行追加削除はE列のみ",                t_xlsx_row_delete_insert_key_only)
+    _run_test("xlsx: MODIFYは1セル1行・G列解決",          t_xlsx_modify_splits_per_cell_and_resolves_header)
+    _run_test("xlsx: header_row=0は列番号表記",           t_xlsx_header_row_zero_falls_back_to_column_letter)
+    _run_test("xlsx: header_row未検出も列番号表記",       t_xlsx_header_not_found_falls_back_to_column_letter)
+    _run_test("xlsx: 文字diffの色（赤取消線/緑太字）",     t_xlsx_rich_text_char_diff_colors)
+    _run_test("xlsx: 差分なしはプレーン文字列",           t_xlsx_no_diff_char_returns_plain_string)
+    _run_test("xlsx: サブキー救済の主キー列は紫",         t_xlsx_subkey_purple_only_on_key_col)
+    _run_test("xlsx: 通常MODIFYは紫にならない",           t_xlsx_normal_modify_no_purple_no_subkey_value)
 
     print("=" * 50)
     print(f"結果: {len(PASS)} PASS / {len(FAIL)} FAIL")

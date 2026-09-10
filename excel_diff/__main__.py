@@ -36,6 +36,7 @@ import sys
 import tomllib
 import webbrowser
 from pathlib import Path
+from typing import Optional
 
 from excel_diff.utils import generate_output_dir
 
@@ -142,6 +143,13 @@ def _build_parser() -> argparse.ArgumentParser:
                         "--key-cols（key モード）と併用時のみ有効")
     p.add_argument("--diff-mode", choices=["lcs", "key"], default=None,
                    help="差分モード: lcs（出現順LCS、デフォルト）または key（キーJOIN）")
+    p.add_argument("--excel-summary", nargs="?", const="", default=None,
+                   metavar="PATH",
+                   help="全差分を1つのExcelに集約出力（パス省略時は既定パス）。"
+                        "--diff-mode key が前提。old_file/new_file の後ろに置くこと")
+    p.add_argument("--header-row", type=int, default=1, metavar="N",
+                   help="ヘッダー行番号（1始まり、デフォルト: 1）。0でヘッダーなし扱い。"
+                        "--excel-summary のG列（項目名）解決にのみ使用し、差分計算自体には影響しない")
 
     # --- 設定セット（プロファイル）参照 ---
     p.add_argument("--profile", metavar="NAME",
@@ -158,6 +166,27 @@ def _default_output_path(new_file: str) -> str:
     stem = Path(new_file).stem
     parent = Path(new_file).parent
     return str(parent / f"{stem}_diff.html")
+
+
+def _default_excel_summary_path(new_file: str) -> str:
+    stem = Path(new_file).stem
+    parent = Path(new_file).parent
+    return str(parent / f"{stem}_diff.xlsx")
+
+
+def _excel_summary_requested(args: argparse.Namespace) -> Optional[str]:
+    """--excel-summary の指定状態を正規化して返す。
+
+    None: 未指定。"": 指定あり・パス省略（既定パスを使う）。それ以外: 明示パス。
+    --profile 経由では TOML の true/false がそのまま bool として setattr されるため、
+    その場合も吸収する。
+    """
+    v = getattr(args, "excel_summary", None)
+    if v is None or v is False:
+        return None
+    if v is True:
+        return ""
+    return str(v)
 
 
 def _diff_stats(file_diff) -> tuple[int, int, int]:
@@ -570,6 +599,15 @@ def _build_config(args: argparse.Namespace):
         sub_disp = ", ".join(get_column_letter(c + 1) for c in config.sub_key_cols)
         print(f"サブキー列: {sub_disp}")
 
+    excel_summary_requested = _excel_summary_requested(args) is not None
+    if excel_summary_requested and config.diff_mode != "key":
+        print(
+            "エラー: --excel-summary を使うには --diff-mode key"
+            "（--key-cols でキー列指定）が必要です",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     return config
 
 
@@ -840,6 +878,18 @@ def _run_file_diff(args: argparse.Namespace) -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(render(file_diff))
 
+    excel_summary = _excel_summary_requested(args)
+    if excel_summary is not None:
+        from .xlsx_diff_renderer import render as render_xlsx
+        summary_path = excel_summary or _default_excel_summary_path(new_path)
+        wb = render_xlsx(
+            [file_diff],
+            header_row=args.header_row,
+            sub_key_cols=config.sub_key_cols,
+        )
+        wb.save(summary_path)
+        print(f"集約Excel → {summary_path}")
+
     print()
     if file_diff.has_differences:
         delete, insert, modify = _diff_stats(file_diff)
@@ -996,6 +1046,20 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
     _write_index_xlsx(results, unmatched, old_dir, new_dir, index_xlsx_path)
     print(f"インデックス → {index_xlsx_path}")
 
+    # 集約サマリXLSXを生成（--excel-summary 指定時のみ）
+    excel_summary = _excel_summary_requested(args)
+    if excel_summary is not None:
+        from .xlsx_diff_renderer import render as render_xlsx
+        summary_path = excel_summary or os.path.join(out_dir, "★summary.xlsx")
+        all_file_diffs = [fd for _, fd, _ in results]
+        wb = render_xlsx(
+            all_file_diffs,
+            header_row=args.header_row,
+            sub_key_cols=config.sub_key_cols,
+        )
+        wb.save(summary_path)
+        print(f"集約Excel → {summary_path}")
+
     if args.open:
         os.startfile(index_xlsx_path)
 
@@ -1018,6 +1082,8 @@ _PROFILE_FIELD_MAP: dict[str, dict[str, str]] = {
         "diff_mode":     "diff_mode",
         "key_cols":      "key_cols",
         "sub_key_cols":  "sub_key_cols",
+        "excel_summary": "excel_summary",
+        "header_row":    "header_row",
     },
     "file_diff": {
         "output":        "output",
@@ -1030,6 +1096,8 @@ _PROFILE_FIELD_MAP: dict[str, dict[str, str]] = {
         "diff_mode":     "diff_mode",
         "key_cols":      "key_cols",
         "sub_key_cols":  "sub_key_cols",
+        "excel_summary": "excel_summary",
+        "header_row":    "header_row",
     },
     "split": {
         "prefix":       "prefix",
@@ -1052,6 +1120,8 @@ _DEST_FLAGS: dict[str, list[str]] = {
     "diff_mode":     ["--diff-mode"],
     "key_cols":      ["--key-cols"],
     "sub_key_cols":  ["--sub-key-cols"],
+    "excel_summary": ["--excel-summary"],
+    "header_row":    ["--header-row"],
     "output":        ["-o", "--output"],
     "prefix":        ["--prefix"],
     "suffix":        ["--suffix"],

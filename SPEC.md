@@ -25,6 +25,7 @@ excel_diff/
 ├── matcher.py           カスタムマッチャー・列フィルタ・DiffConfig定義
 ├── diff_engine.py       差分アルゴリズム（LCS・キーJOIN両モード）
 ├── html_renderer.py     HTML出力
+├── xlsx_diff_renderer.py 集約Excel出力（--excel-summary、複数FileDiffを1ブックに集約）
 ├── file_pairing.py      ファイルペアリング（discover / 正規表現生成・検証 / パターン適用）
 ├── patterns.py          パターン定義の永続化（PatternStore / patterns.json）
 └── splitter.py          ブックをシート単位ファイルに分解
@@ -85,6 +86,78 @@ excel-diff.exe --dir <旧フォルダ> <新フォルダ> [オプション]
 | 完全一致 | なし | 旧・新フォルダのファイル名が同一 |
 | ペアJSON | `--pairs FILE` | `--discover` で探索・確認済みのペアを直接使用 |
 | パターン | `--pattern ID` | 保存済み正規表現パターンで繰り返し比較 |
+
+### 4-2-1. 集約Excel出力（`--excel-summary`）
+
+```
+excel-diff.exe <旧> <新> --key-cols C --excel-summary [PATH]
+excel-diff.exe --dir <旧フォルダ> <新フォルダ> --key-cols C --excel-summary [PATH]
+```
+
+ファイル比較・フォルダ比較の両方で使用可能な、複数ファイルの差分を1つのExcelファイルに
+集約するオプション。単一ファイル比較の場合も内部的には「要素数1の `FileDiff` リスト」として
+同じレンダラー（`xlsx_diff_renderer.render()`）を通す。
+
+**前提条件:** `--diff-mode key`（`--key-cols` 指定）が必須。`lcs` モードで指定した場合は
+`_build_config()` 内でエラー終了する（`--diff-mode key` 未指定時の既存エラーパターンに倣う）。
+
+**パス省略時の既定値:**
+
+| モード | 既定パス |
+|---|---|
+| ファイル比較 | `<新ファイル名>_diff.xlsx` |
+| フォルダ比較 | `<出力先フォルダ>/★summary.xlsx` |
+
+フォルダ比較時は既存の `★index.xlsx`（ファイルペアごとのサマリ＋リンク一覧）とは
+別ファイルとして共存する。役割を分けることでそれぞれの列構成をシンプルに保つ。
+
+**出力列仕様（1シート「差分一覧」、A〜I列、1行目はヘッダー行）:**
+
+| 列 | 内容 |
+|---|---|
+| A | 旧ファイル（フルパス） |
+| B | 新ファイル（フルパス） |
+| C | シート名 |
+| D | 種類：`追加` / `削除` / `変更` / `シート追加` / `シート削除` |
+| E | 比較キー（`key_cols` の値。複数キー列はカンマ区切りで1セルに結合） |
+| F | 準比較キー（サブキー救済 `RowDiff.matched_by == "subkey"` の行のみ、`sub_key_cols` の値を入れる。通常は空欄） |
+| G | 項目（ヘッダー行から解決した列名。解決できない場合は列番号表記、例: `"F"`） |
+| H | 旧項目値（文字単位diffをリッチテキストで表現） |
+| I | 新項目値（文字単位diffをリッチテキストで表現） |
+
+**行の生成ルール:**
+
+- EQUAL行（変更なし）は出力しない
+- 行単位の追加・削除（`RowTag.DELETE` / `RowTag.INSERT`）: 1差分＝1行。種類・比較キー・
+  準比較キー（常に空欄）列のみ埋め、項目・旧項目値・新項目値は空欄
+- シート丸ごと追加・削除（`SheetDiff.status in ("added", "deleted")`）: シート内の行を
+  1行ずつ列挙せず、要約1行のみ出力。他の列（比較キー〜新項目値）は空欄
+- 変更（`RowTag.MODIFY`）: **1変更セル（`CellDiff` 1件）＝1行**。同一行内で複数列が
+  変わった場合は同じ比較キーで複数行に分かれる
+
+**色・書式ルール（HTML版 `html_renderer.py` の配色を流用）:**
+
+- 行全体の背景色: 追加・シート追加＝薄緑（`#e6ffed`相当）、削除・シート削除＝薄赤
+  （`#ffeef0`相当）、変更＝薄黄（`#fff8c5`相当）
+- 文字単位のdiff（`SequenceMatcher` のopcodesを `html_renderer._render_cell_pair_diff` と
+  同じロジックで計算し、openpyxlの `CellRichText`/`TextBlock`/`InlineFont` で表現）:
+  H列は削除された文字部分のみ赤字＋取り消し線、I列は追加された文字部分のみ緑字＋太字
+  - 元セルに `CellData.strikethrough`（`--strikethrough` 指定時）が立っている場合、
+    セル全体（全run）に取り消し線を追加適用する
+- 紫背景（HTMLの `cell-modified-subkey` 相当）: `CellDiff.col_idx` が `key_cols` に含まれ、
+  かつ `RowDiff.matched_by == "subkey"` の場合のみ、H列・I列を紫背景（`#e8dcff`相当）で
+  上書きする（行全体の種類色より優先し、行全体は塗らない）
+
+**`--header-row N` オプション:**
+
+G列（項目名）のラベル解決にのみ使用し、**差分計算そのものには一切影響しない**
+（`reader.py` の行読み込み・`diff_engine.py` の比較ロジックは変更されない）。
+1始まりで、デフォルトは `1`。`0` はヘッダーなし扱いで、常に列番号表記にフォールバックする。
+old側・new側で指定行の値が食い違う場合はold側を優先し、old側に値がなければnew側を使う。
+
+**GUI・プロファイル連携:** `_PROFILE_FIELD_MAP["dir_diff"]` / `["file_diff"]` と
+`excel_diff_gui/tab_dir_diff.py` / `tab_file_diff.py` に `excel_summary` / `header_row` が
+対応しており、GUIでもプロファイル保存・復元の対象になる。
 
 ### 4-3. ペアリング候補の探索
 
@@ -157,6 +230,8 @@ excel-diff.exe --split <ブック.xlsx> [--prefix TEXT] [--suffix TEXT] [--name-
 | `--key-cols SPEC` | キーJOIN差分モードのキー列（例: `C` / `B,C`）。指定するとキーモードが有効になる | なし |
 | `--sub-key-cols SPEC` | 主キーで対応が確定しなかった行を救済する2段目のキー列（例: `D`）。`--key-cols`（keyモード）と併用時のみ有効 | なし |
 | `--diff-mode MODE` | 差分モード: `lcs` または `key` | `lcs` |
+| `--excel-summary [PATH]` | 全差分を1つのExcelに集約出力（パス省略時は既定パス）。`--diff-mode key` が前提 | 未指定（HTMLのみ） |
+| `--header-row N` | 集約Excelの項目名（G列）解決に使う行番号（1始まり、`0`=ヘッダーなし） | `1` |
 | `--open` / `--no-open` | ファイル比較: 生成HTMLをブラウザで開く。フォルダ比較: ★index.xlsx をExcelで開く | 有効 |
 
 **ペアリングパターン管理**
