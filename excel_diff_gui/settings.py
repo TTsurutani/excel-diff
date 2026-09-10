@@ -20,6 +20,8 @@ _DEFAULT: dict[str, Any] = {
         "diff_mode": "lcs",
         "key_cols": "",
         "sub_key_cols": "",
+        "excel_summary": "",
+        "header_row": 1,
     },
     "dir_diff": {
         "output_dir": "",
@@ -32,6 +34,8 @@ _DEFAULT: dict[str, Any] = {
         "diff_mode": "lcs",
         "key_cols": "",
         "sub_key_cols": "",
+        "excel_summary": "",
+        "header_row": 1,
     },
     "pair_build": {
         "old_dir": "",
@@ -197,9 +201,9 @@ def set_split_presets(presets: list) -> None:
 # 同一性チェック時に除外するパス系フィールド（FileSelectRow を使うフィールド）。
 # 新しいパスフィールドをタブに追加したら、ここにも追記すること。
 _PATH_KEYS: dict[str, set[str]] = {
-    "dir_diff":      {"output_dir", "matchers"},
+    "dir_diff":      {"output_dir", "matchers", "excel_summary"},
     "pair_build":    {"old_dir", "new_dir", "pairs_file"},
-    "file_diff":     {"old_file", "new_file", "output", "matchers"},
+    "file_diff":     {"old_file", "new_file", "output", "matchers", "excel_summary"},
     "split":         {"book_file", "output_dir"},
     "sheet_compare": {"old_file", "new_file", "output_dir"},
 }

@@ -32,10 +32,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import tomllib
 import webbrowser
 from pathlib import Path
+from typing import Optional
 
 from excel_diff.utils import generate_output_dir
 
@@ -142,6 +144,13 @@ def _build_parser() -> argparse.ArgumentParser:
                         "--key-cols（key モード）と併用時のみ有効")
     p.add_argument("--diff-mode", choices=["lcs", "key"], default=None,
                    help="差分モード: lcs（出現順LCS、デフォルト）または key（キーJOIN）")
+    p.add_argument("--excel-summary", nargs="?", const="", default=None,
+                   metavar="PATH",
+                   help="全差分を1つのExcelに集約出力（パス省略時は既定パス）。"
+                        "--diff-mode key が前提。old_file/new_file の後ろに置くこと")
+    p.add_argument("--header-row", type=int, default=1, metavar="N",
+                   help="ヘッダー行番号（1始まり、デフォルト: 1）。0でヘッダーなし扱い。"
+                        "--excel-summary のG列（項目名）解決にのみ使用し、差分計算自体には影響しない")
 
     # --- 設定セット（プロファイル）参照 ---
     p.add_argument("--profile", metavar="NAME",
@@ -158,6 +167,167 @@ def _default_output_path(new_file: str) -> str:
     stem = Path(new_file).stem
     parent = Path(new_file).parent
     return str(parent / f"{stem}_diff.html")
+
+
+def _default_excel_summary_path(new_file: str) -> str:
+    stem = Path(new_file).stem
+    parent = Path(new_file).parent
+    return str(parent / f"{stem}_diff.xlsx")
+
+
+def _excel_summary_requested(args: argparse.Namespace) -> Optional[str]:
+    """--excel-summary の指定状態を正規化して返す。
+
+    None: 未指定。"": 指定あり・パス省略（既定パスを使う）。それ以外: 明示パス。
+    --profile 経由では TOML の true/false がそのまま bool として setattr されるため、
+    その場合も吸収する。
+    """
+    v = getattr(args, "excel_summary", None)
+    if v is None or v is False:
+        return None
+    if v is True:
+        return ""
+    return str(v)
+
+
+def _close_workbook_if_open_in_excel(path: str) -> bool:
+    """起動中のExcelで path を開いているブックがあれば、保存せずに閉じる。
+
+    閉じられた場合 True、Excelが起動していない・対象ブックが見つからない・
+    pywin32が使えない等の場合は False を返す（呼び出し元は False ならフォール
+    バックの通常エラーにする）。
+    """
+    try:
+        import pythoncom
+        import win32com.client
+    except ImportError:
+        return False
+
+    target = os.path.abspath(path)
+    pythoncom.CoInitialize()
+    try:
+        try:
+            excel = win32com.client.GetActiveObject("Excel.Application")
+        except Exception:
+            return False  # Excelが起動していない
+
+        closed = False
+        for wb_open in list(excel.Workbooks):
+            try:
+                if os.path.abspath(wb_open.FullName) == target:
+                    wb_open.Close(SaveChanges=False)
+                    closed = True
+            except Exception:
+                continue
+        return closed
+    finally:
+        pythoncom.CoUninitialize()
+
+
+_T_ELEM_RE = re.compile(rb"<t>([^<]*)</t>")
+_WS_BYTES = (b" ", b"\t", b"\n")
+
+
+def _add_xml_space_preserve(data: bytes) -> bytes:
+    """`<t>...</t>` の内容が空白文字（半角空白・タブ・LF）で始まる/終わる場合に
+    `xml:space="preserve"` 属性を付与する。
+
+    openpyxl（3.1.5で確認）は、プレーンセル・リッチテキストのrunどちらでも、
+    `<t>` 要素の内容が空白のみ（例: 差分が改行1文字だけの場合の変更run）や
+    前後が空白の場合でも `xml:space="preserve"` を付与しない既知の制限がある。
+    OOXMLの仕様上これが無いと空白を保持できない/文字列プロパティとして
+    不正と判定され、Excel起動時に「修復されたレコード」警告の原因になる。
+    """
+    def repl(m: "re.Match[bytes]") -> bytes:
+        content = m.group(1)
+        if content and (content[:1] in _WS_BYTES or content[-1:] in _WS_BYTES):
+            return b'<t xml:space="preserve">' + content + b"</t>"
+        return m.group(0)
+
+    return _T_ELEM_RE.sub(repl, data)
+
+
+def _fix_crlf_in_saved_xlsx(path: str) -> None:
+    """保存済みxlsx内のXMLパートに対し、openpyxlの既知の書き込み上の問題を
+    後処理で修正する（Excel起動時の「修復されたレコード」警告の回避）。
+
+    1. セル文字列中の \\r\\n / \\r を \\n に正規化する。openpyxl（3.1.5で確認）は、
+       セル値に含まれる \\n を保存時のXMLシリアライズで \\r\\n として書き出して
+       しまう既知の挙動がある。OOXMLのST_Xstring往復仕様上、生の \\r はXML
+       パーサーが暗黙的に \\n へ正規化してしまうため本来 &#13; でエスケープ
+       すべきところであり、これも上記警告の原因になる。
+       本関数はこちら側の入力を既に \\n へ正規化済み（xlsx_diff_renderer._strip_ctrl等）
+       という前提のもと、保存後のXMLに残る \\r をopenpyxl側の副作用とみなして
+       一括で取り除く（構造上の空白に対して行っても実害はない）。
+    2. `<t>` 要素が空白のみ/前後が空白の場合、`xml:space="preserve"` を付与する
+       （`_add_xml_space_preserve()`、上記と同根の別の既知の制限）。
+    """
+    import io
+    import zipfile
+
+    with zipfile.ZipFile(path, "r") as zin:
+        infos = zin.infolist()
+        contents = {info.filename: zin.read(info.filename) for info in infos}
+
+    changed = False
+    for name, data in contents.items():
+        if not name.endswith(".xml"):
+            continue
+        new_data = data
+        if b"\r" in new_data:
+            new_data = new_data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        new_data = _add_xml_space_preserve(new_data)
+        if new_data != data:
+            contents[name] = new_data
+            changed = True
+
+    if not changed:
+        return
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in infos:
+            zout.writestr(info, contents[info.filename])
+
+    with open(path, "wb") as f:
+        f.write(buf.getvalue())
+
+
+def _save_workbook_or_raise(wb, path: str, label: str) -> None:
+    """Workbook を保存する。保存先が別プロセスで開かれていて PermissionError に
+    なった場合、起動中のExcelで開かれているブックであれば自動的に閉じて
+    （保存確認なしで破棄）1回だけ保存を再試行する。それでも失敗する場合や
+    Excel以外のプロセスが握っている場合は、分かりやすいメッセージに変換して
+    PermissionErrorを再送出する。
+
+    保存成功時は _fix_crlf_in_saved_xlsx() でopenpyxlの \\r\\n 書き込みの
+    副作用を後処理で修正する。
+
+    CLI側の呼び出し元はこれを捕捉して エラー: 表示 + sys.exit(1) する。GUI側の呼び出し元
+    （ワーカースレッド経由）は捕捉せずそのまま伝播させれば、Worker._loop() が
+    ("err", exc) としてキューに積み、各タブの _poll()/_poll_compare() が
+    str(exc)（＝このメッセージ）をログに表示する。
+    """
+    try:
+        wb.save(path)
+        _fix_crlf_in_saved_xlsx(path)
+        return
+    except PermissionError as e:
+        first_error = e
+
+    if _close_workbook_if_open_in_excel(path):
+        print(f"（{label}が既にExcelで開かれていたため閉じて保存し直します: {path}）")
+        try:
+            wb.save(path)
+            _fix_crlf_in_saved_xlsx(path)
+            return
+        except PermissionError as e:
+            first_error = e
+
+    raise PermissionError(
+        f"{label}を保存できません。別のプロセス（Excel等）で開いている"
+        f"可能性があります。閉じてから再実行してください: {path}"
+    ) from first_error
 
 
 def _diff_stats(file_diff) -> tuple[int, int, int]:
@@ -373,7 +543,7 @@ def _write_index_xlsx(
     # ---- ウィンドウ固定（ヘッダ行） ----
     ws.freeze_panes = "A11"
 
-    wb.save(out_path)
+    _save_workbook_or_raise(wb, out_path, "インデックス")
 
 
 def _render_index_html(
@@ -569,6 +739,15 @@ def _build_config(args: argparse.Namespace):
         from openpyxl.utils import get_column_letter
         sub_disp = ", ".join(get_column_letter(c + 1) for c in config.sub_key_cols)
         print(f"サブキー列: {sub_disp}")
+
+    excel_summary_requested = _excel_summary_requested(args) is not None
+    if excel_summary_requested and config.diff_mode != "key":
+        print(
+            "エラー: --excel-summary を使うには --diff-mode key"
+            "（--key-cols でキー列指定）が必要です",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     return config
 
@@ -840,6 +1019,22 @@ def _run_file_diff(args: argparse.Namespace) -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(render(file_diff))
 
+    excel_summary = _excel_summary_requested(args)
+    if excel_summary is not None:
+        from .xlsx_diff_renderer import render as render_xlsx
+        summary_path = excel_summary or _default_excel_summary_path(new_path)
+        wb = render_xlsx(
+            [file_diff],
+            header_row=args.header_row,
+            sub_key_cols=config.sub_key_cols,
+        )
+        try:
+            _save_workbook_or_raise(wb, summary_path, "集約Excel")
+        except PermissionError as e:
+            print(f"エラー: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(f"集約Excel → {summary_path}")
+
     print()
     if file_diff.has_differences:
         delete, insert, modify = _diff_stats(file_diff)
@@ -993,8 +1188,30 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
 
     # インデックスXLSXを生成
     index_xlsx_path = os.path.join(out_dir, "★index.xlsx")
-    _write_index_xlsx(results, unmatched, old_dir, new_dir, index_xlsx_path)
+    try:
+        _write_index_xlsx(results, unmatched, old_dir, new_dir, index_xlsx_path)
+    except PermissionError as e:
+        print(f"エラー: {e}", file=sys.stderr)
+        sys.exit(1)
     print(f"インデックス → {index_xlsx_path}")
+
+    # 集約サマリXLSXを生成（--excel-summary 指定時のみ）
+    excel_summary = _excel_summary_requested(args)
+    if excel_summary is not None:
+        from .xlsx_diff_renderer import render as render_xlsx
+        summary_path = excel_summary or os.path.join(out_dir, "★summary.xlsx")
+        all_file_diffs = [fd for _, fd, _ in results]
+        wb = render_xlsx(
+            all_file_diffs,
+            header_row=args.header_row,
+            sub_key_cols=config.sub_key_cols,
+        )
+        try:
+            _save_workbook_or_raise(wb, summary_path, "集約Excel")
+        except PermissionError as e:
+            print(f"エラー: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(f"集約Excel → {summary_path}")
 
     if args.open:
         os.startfile(index_xlsx_path)
@@ -1018,6 +1235,8 @@ _PROFILE_FIELD_MAP: dict[str, dict[str, str]] = {
         "diff_mode":     "diff_mode",
         "key_cols":      "key_cols",
         "sub_key_cols":  "sub_key_cols",
+        "excel_summary": "excel_summary",
+        "header_row":    "header_row",
     },
     "file_diff": {
         "output":        "output",
@@ -1030,6 +1249,8 @@ _PROFILE_FIELD_MAP: dict[str, dict[str, str]] = {
         "diff_mode":     "diff_mode",
         "key_cols":      "key_cols",
         "sub_key_cols":  "sub_key_cols",
+        "excel_summary": "excel_summary",
+        "header_row":    "header_row",
     },
     "split": {
         "prefix":       "prefix",
@@ -1052,6 +1273,8 @@ _DEST_FLAGS: dict[str, list[str]] = {
     "diff_mode":     ["--diff-mode"],
     "key_cols":      ["--key-cols"],
     "sub_key_cols":  ["--sub-key-cols"],
+    "excel_summary": ["--excel-summary"],
+    "header_row":    ["--header-row"],
     "output":        ["-o", "--output"],
     "prefix":        ["--prefix"],
     "suffix":        ["--suffix"],

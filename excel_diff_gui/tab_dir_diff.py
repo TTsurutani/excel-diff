@@ -35,6 +35,8 @@ class TabDirDiff(tk.Frame):
         self._strike   = tk.BooleanVar(value=cfg.get("dir_diff", "strikethrough"))
         self._open_br  = tk.BooleanVar(value=cfg.get("dir_diff", "open_browser", True))
         self._mode     = tk.StringVar(value=cfg.get("dir_diff", "diff_mode", "lcs"))
+        self._excel_summary = tk.StringVar(value=cfg.get("dir_diff", "excel_summary", ""))
+        self._header_row = tk.StringVar(value=str(cfg.get("dir_diff", "header_row", 1)))
 
         self._build()
 
@@ -133,6 +135,20 @@ class TabDirDiff(tk.Frame):
             filetypes=[("JSON", "*.json"), ("All", "*.*")],
         ).pack(fill="x", padx=6, pady=2)
 
+        FileSelectRow(
+            grp_opt, "集約Excel", self._excel_summary,
+            filetypes=[("Excel", "*.xlsx"), ("All", "*.*")],
+        ).pack(fill="x", padx=6, pady=2)
+
+        fr_hr = tk.Frame(grp_opt)
+        fr_hr.pack(fill="x", padx=6, pady=2)
+        tk.Label(fr_hr, text="ヘッダー行", width=14, anchor="w").pack(side="left")
+        tk.Entry(fr_hr, textvariable=self._header_row, width=6).pack(side="left")
+        tk.Label(
+            fr_hr, text="集約Excelの項目名解決に使用。1始まり、0=ヘッダーなし",
+            fg="gray",
+        ).pack(side="left", padx=4)
+
         tk.Checkbutton(
             grp_opt, text="取り消し線も差分として扱う", variable=self._strike,
         ).pack(anchor="w", padx=6, pady=2)
@@ -211,6 +227,10 @@ class TabDirDiff(tk.Frame):
 
     def get_compare_options(self) -> dict:
         """現在の比較オプションを返す。比較ペア構築タブから参照される。"""
+        try:
+            header_row = int(self._header_row.get().strip() or "1")
+        except ValueError:
+            header_row = 1
         return {
             "output_dir":    self._out_dir.get().strip(),
             "sheet_old":     self._sheet_old.get().strip(),
@@ -222,6 +242,8 @@ class TabDirDiff(tk.Frame):
             "diff_mode":     self._mode.get(),
             "key_cols":      self._key_cols.get().strip(),
             "sub_key_cols":  self._sub_key_cols.get().strip(),
+            "excel_summary": self._excel_summary.get().strip(),
+            "header_row":    header_row,
         }
 
     def get_snapshot(self) -> dict:
@@ -239,6 +261,7 @@ class TabDirDiff(tk.Frame):
             "key_cols":      self._key_cols,
             "sub_key_cols":  self._sub_key_cols,
             "diff_mode":     self._mode,
+            "excel_summary": self._excel_summary,
         }
         for key, var in mapping.items():
             if key in snap:
@@ -247,6 +270,8 @@ class TabDirDiff(tk.Frame):
             self._strike.set(bool(snap["strikethrough"]))
         if "open_browser" in snap:
             self._open_br.set(bool(snap["open_browser"]))
+        if "header_row" in snap:
+            self._header_row.set(str(int(snap["header_row"])))
         self._on_mode()
 
     def save_state(self) -> None:
