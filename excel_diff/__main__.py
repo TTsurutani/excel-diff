@@ -175,19 +175,34 @@ def _default_excel_summary_path(new_file: str) -> str:
     return str(parent / f"{stem}_diff.xlsx")
 
 
-def _excel_summary_requested(args: argparse.Namespace) -> Optional[str]:
-    """--excel-summary の指定状態を正規化して返す。
+def _default_dir_summary_path(out_dir: str) -> str:
+    return os.path.join(out_dir, "★summary.xlsx")
 
-    None: 未指定。"": 指定あり・パス省略（既定パスを使う）。それ以外: 明示パス。
-    --profile 経由では TOML の true/false がそのまま bool として setattr されるため、
-    その場合も吸収する。
+
+def normalize_excel_summary(v) -> Optional[str]:
+    """集約Excel指定値（CLI引数・プロファイルTOML・GUIスナップショット共通）を正規化する。
+
+    None: 出力しない（未指定 / false）。"": 既定パスに出力（true / 空文字）。
+    それ以外: 明示パス。CLI と GUI は必ずこの関数を通して解釈すること。
     """
-    v = getattr(args, "excel_summary", None)
     if v is None or v is False:
         return None
     if v is True:
         return ""
-    return str(v)
+    return str(v).strip()
+
+
+def resolve_excel_summary_path(v, default_path: str) -> Optional[str]:
+    """集約Excelの保存先を返す（出力しない場合は None）。"""
+    s = normalize_excel_summary(v)
+    if s is None:
+        return None
+    return s or default_path
+
+
+def _excel_summary_requested(args: argparse.Namespace) -> Optional[str]:
+    """--excel-summary の指定状態を正規化して返す（normalize_excel_summary 参照）。"""
+    return normalize_excel_summary(getattr(args, "excel_summary", None))
 
 
 def _close_workbook_if_open_in_excel(path: str) -> bool:
@@ -1019,10 +1034,11 @@ def _run_file_diff(args: argparse.Namespace) -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(render(file_diff))
 
-    excel_summary = _excel_summary_requested(args)
-    if excel_summary is not None:
+    summary_path = resolve_excel_summary_path(
+        getattr(args, "excel_summary", None), _default_excel_summary_path(new_path)
+    )
+    if summary_path is not None:
         from .xlsx_diff_renderer import render as render_xlsx
-        summary_path = excel_summary or _default_excel_summary_path(new_path)
         wb = render_xlsx(
             [file_diff],
             header_row=args.header_row,
@@ -1196,10 +1212,11 @@ def _run_dir_diff(args: argparse.Namespace) -> None:
     print(f"インデックス → {index_xlsx_path}")
 
     # 集約サマリXLSXを生成（--excel-summary 指定時のみ）
-    excel_summary = _excel_summary_requested(args)
-    if excel_summary is not None:
+    summary_path = resolve_excel_summary_path(
+        getattr(args, "excel_summary", None), _default_dir_summary_path(out_dir)
+    )
+    if summary_path is not None:
         from .xlsx_diff_renderer import render as render_xlsx
-        summary_path = excel_summary or os.path.join(out_dir, "★summary.xlsx")
         all_file_diffs = [fd for _, fd, _ in results]
         wb = render_xlsx(
             all_file_diffs,

@@ -534,7 +534,9 @@ class TabPatterns(tk.Frame):
             else cfg.data("dir_diff")
         )
         self._compare_open_browser = options.get("open_browser", True)
-        if options.get("excel_summary", "").strip() and options.get("diff_mode") != "key":
+        from excel_diff.__main__ import normalize_excel_summary
+        if (normalize_excel_summary(options.get("excel_summary")) is not None
+                and options.get("diff_mode") != "key"):
             messagebox.showerror(
                 "エラー",
                 "集約Excelを使うにはキーJOINモード（キー列指定）が必要です",
@@ -556,6 +558,7 @@ class TabPatterns(tk.Frame):
         from excel_diff.matcher import DiffConfig, parse_col_spec, parse_col_list, load_config
         from excel_diff.__main__ import (
             _render_index_html, _write_index_xlsx, _save_workbook_or_raise,
+            resolve_excel_summary_path, _default_dir_summary_path,
         )
 
         sheet_old_pat  = options.get("sheet_old") or None
@@ -567,7 +570,7 @@ class TabPatterns(tk.Frame):
         key_cols_str   = options.get("key_cols", "")
         sub_key_cols_str = options.get("sub_key_cols", "")
         output_dir_opt = options.get("output_dir", "")
-        excel_summary_opt = options.get("excel_summary", "").strip()
+        excel_summary_opt = options.get("excel_summary")
         header_row     = options.get("header_row", 1)
 
         if matchers_file and os.path.isfile(matchers_file):
@@ -662,14 +665,17 @@ class TabPatterns(tk.Frame):
         index_xlsx_path = os.path.join(out_dir, "★index.xlsx")
         _write_index_xlsx(results, unmatched, old_dir, new_dir, index_xlsx_path)
 
-        if excel_summary_opt:
+        summary_path = resolve_excel_summary_path(
+            excel_summary_opt, _default_dir_summary_path(out_dir)
+        )
+        if summary_path is not None:
             from excel_diff.xlsx_diff_renderer import render as render_xlsx
             all_file_diffs = [fd for _, fd, _ in results]
             wb = render_xlsx(
                 all_file_diffs, header_row=header_row, sub_key_cols=config.sub_key_cols
             )
-            _save_workbook_or_raise(wb, excel_summary_opt, "集約Excel")
-            self._log(f"集約Excel → {excel_summary_opt}")
+            _save_workbook_or_raise(wb, summary_path, "集約Excel")
+            self._log(f"集約Excel → {summary_path}")
 
         return index_xlsx_path, skipped
 
