@@ -20,7 +20,7 @@ _DEFAULT: dict[str, Any] = {
         "diff_mode": "lcs",
         "key_cols": "",
         "sub_key_cols": "",
-        "excel_summary": "",
+        "excel_summary": False,
         "header_row": 1,
     },
     "dir_diff": {
@@ -34,7 +34,7 @@ _DEFAULT: dict[str, Any] = {
         "diff_mode": "lcs",
         "key_cols": "",
         "sub_key_cols": "",
-        "excel_summary": "",
+        "excel_summary": False,
         "header_row": 1,
     },
     "pair_build": {
@@ -337,12 +337,31 @@ def delete_profile(profile_id: str) -> None:
 
 
 def build_identity_snapshot(snapshot: dict) -> dict:
-    """パスフィールドを除いた同一性チェック用スナップショットを返す。"""
+    """パスフィールドを除いた同一性チェック用スナップショットを返す。
+    excel_summary は保存先パスを除外し、出力ON/OFFだけを比較対象に残す。
+    """
     result = {}
     for tab, vals in snapshot.items():
         exclude = _PATH_KEYS.get(tab, set())
         result[tab] = {k: v for k, v in vals.items() if k not in exclude}
+        if "excel_summary" in exclude:
+            result[tab]["excel_summary"] = summary_to_ui(vals.get("excel_summary"))[0]
     return result
+
+
+def summary_to_ui(value: Any) -> tuple[bool, str]:
+    """集約Excel指定値 → (出力ON/OFF, 保存先パス)。解釈は CLI と共通の
+    normalize_excel_summary に委ねる（キーなし=None=OFF も CLI と同じ）。"""
+    from excel_diff.__main__ import normalize_excel_summary
+    s = normalize_excel_summary(value)
+    return (s is not None, s or "")
+
+
+def summary_from_ui(enabled: bool, path: str) -> Any:
+    """(出力ON/OFF, 保存先パス) → 集約Excel指定値（false / true / パス文字列）。"""
+    if not enabled:
+        return False
+    return path.strip() or True
 
 
 def find_matching_profile(snapshot: dict) -> Optional[dict]:

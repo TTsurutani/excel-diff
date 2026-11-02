@@ -16,6 +16,7 @@ import argparse
 from excel_diff.__main__ import (
     _build_parser, _build_config, _apply_profile, _profiles_dir,
     _save_workbook_or_raise, _write_index_xlsx,
+    normalize_excel_summary, resolve_excel_summary_path,
 )
 
 
@@ -167,6 +168,32 @@ def t_excel_summary_with_path():
     """--excel-summary にパスを指定するとそのまま args に反映される"""
     args = _build_parser().parse_args(["--key-cols", "A", "--excel-summary", "out.xlsx"])
     assert args.excel_summary == "out.xlsx"
+
+
+def t_excel_summary_resolution_table():
+    """集約Excel指定値の解釈（CLI/GUI共通）: false/None=出力なし、true/""=既定パス、str=指定パス"""
+    cases = [
+        (None, None), (False, None),
+        (True, "D.xlsx"), ("", "D.xlsx"), ("  ", "D.xlsx"),
+        ("out.xlsx", "out.xlsx"), (" out.xlsx ", "out.xlsx"),
+    ]
+    for v, expected in cases:
+        got = resolve_excel_summary_path(v, "D.xlsx")
+        assert got == expected, f"{v!r}: {got!r} != {expected!r}"
+    assert normalize_excel_summary(True) == ""
+
+
+def t_gui_summary_roundtrip_matches_cli():
+    """GUIのUI⇔値の変換が CLI の解釈と一致する（プロファイルの値をGUIで読み込んで保存し直しても意味が変わらない）"""
+    from excel_diff_gui.settings import summary_to_ui, summary_from_ui
+    for v in (None, False, True, "", "out.xlsx"):
+        on, path = summary_to_ui(v)
+        assert on == (resolve_excel_summary_path(v, "D") is not None), v
+        v2 = summary_from_ui(on, path)
+        assert resolve_excel_summary_path(v2, "D") == resolve_excel_summary_path(v, "D"), v
+    # StringVar 化けで "1" が生まれないこと
+    assert summary_from_ui(True, "") is True
+    assert summary_from_ui(False, "x.xlsx") is False
 
 
 def t_header_row_default_is_one():
@@ -433,6 +460,8 @@ if __name__ == "__main__":
     _run_test("集約Excel: 未指定はNone",                 t_excel_summary_default_is_none)
     _run_test("集約Excel: パス省略でconst空文字列",       t_excel_summary_bare_flag_yields_empty_string)
     _run_test("集約Excel: パス指定が反映される",           t_excel_summary_with_path)
+    _run_test("集約Excel: 指定値の解釈テーブル",           t_excel_summary_resolution_table)
+    _run_test("集約Excel: GUI変換がCLI解釈と一致",         t_gui_summary_roundtrip_matches_cli)
     _run_test("ヘッダー行: デフォルトは1",                t_header_row_default_is_one)
     _run_test("ヘッダー行: 明示指定が反映される",          t_header_row_explicit_value)
     _run_test(

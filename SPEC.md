@@ -196,6 +196,25 @@ old側・new側で指定行の値が食い違う場合はold側を優先し、ol
 `excel_diff_gui/tab_dir_diff.py` / `tab_file_diff.py` に `excel_summary` / `header_row` が
 対応しており、GUIでもプロファイル保存・復元の対象になる。
 
+**値の解釈（CLI・GUI共通）:** `excel_summary` の値は次の意味を持つ。
+
+| 値 | 意味 |
+|---|---|
+| 未指定 / `false` | 出力しない |
+| `true` / `""`（CLIでのパス省略） | 既定パスに出力（上表） |
+| パス文字列 | そのパスに出力 |
+
+解釈は `__main__.normalize_excel_summary()`、保存先の決定は `resolve_excel_summary_path(値, 既定パス)` に一本化されている
+（既定パスは `_default_excel_summary_path(new_file)` / `_default_dir_summary_path(out_dir)`）。
+GUI は「集約Excelを出力」チェック（BooleanVar）＋保存先欄（StringVar）で表現し、
+`excel_diff_gui.settings.summary_to_ui()` / `summary_from_ui()` で上記の値と相互変換する
+（チェックOFF → `false`、ON・空欄 → `true`、ON・パスあり → パス文字列。プロファイルにキーがなければOFF）。
+実行時のkeyモード前提チェック・出力先決定も同じ関数を通す。
+
+> **設計上の注意:** CLI と GUI の両方から使う設定値は、解釈ロジックを共通関数に置き、GUI 側で
+> `.strip()` 判定等を独自実装しないこと。過去に GUI が `StringVar.set(True)` で `true` を `"1"` に
+> 化けさせ、カレントディレクトリに `1` というファイルを出力していた（CLI は正しく `★summary.xlsx` に出力）。
+
 ### 4-3. ペアリング候補の探索
 
 ```

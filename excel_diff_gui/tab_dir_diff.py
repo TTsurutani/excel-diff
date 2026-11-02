@@ -35,7 +35,9 @@ class TabDirDiff(tk.Frame):
         self._strike   = tk.BooleanVar(value=cfg.get("dir_diff", "strikethrough"))
         self._open_br  = tk.BooleanVar(value=cfg.get("dir_diff", "open_browser", True))
         self._mode     = tk.StringVar(value=cfg.get("dir_diff", "diff_mode", "lcs"))
-        self._excel_summary = tk.StringVar(value=cfg.get("dir_diff", "excel_summary", ""))
+        _es_on, _es_path = cfg.summary_to_ui(cfg.get("dir_diff", "excel_summary"))
+        self._excel_summary_on = tk.BooleanVar(value=_es_on)
+        self._excel_summary = tk.StringVar(value=_es_path)
         self._header_row = tk.StringVar(value=str(cfg.get("dir_diff", "header_row", 1)))
 
         self._build()
@@ -135,8 +137,12 @@ class TabDirDiff(tk.Frame):
             filetypes=[("JSON", "*.json"), ("All", "*.*")],
         ).pack(fill="x", padx=6, pady=2)
 
+        tk.Checkbutton(
+            grp_opt, text="集約Excelを出力（保存先が空欄なら <出力フォルダ>/★summary.xlsx）",
+            variable=self._excel_summary_on,
+        ).pack(anchor="w", padx=6, pady=2)
         FileSelectRow(
-            grp_opt, "集約Excel", self._excel_summary,
+            grp_opt, "集約Excel保存先", self._excel_summary,
             filetypes=[("Excel", "*.xlsx"), ("All", "*.*")],
         ).pack(fill="x", padx=6, pady=2)
 
@@ -242,7 +248,8 @@ class TabDirDiff(tk.Frame):
             "diff_mode":     self._mode.get(),
             "key_cols":      self._key_cols.get().strip(),
             "sub_key_cols":  self._sub_key_cols.get().strip(),
-            "excel_summary": self._excel_summary.get().strip(),
+            "excel_summary": cfg.summary_from_ui(
+                self._excel_summary_on.get(), self._excel_summary.get()),
             "header_row":    header_row,
         }
 
@@ -261,7 +268,6 @@ class TabDirDiff(tk.Frame):
             "key_cols":      self._key_cols,
             "sub_key_cols":  self._sub_key_cols,
             "diff_mode":     self._mode,
-            "excel_summary": self._excel_summary,
         }
         for key, var in mapping.items():
             if key in snap:
@@ -272,6 +278,10 @@ class TabDirDiff(tk.Frame):
             self._open_br.set(bool(snap["open_browser"]))
         if "header_row" in snap:
             self._header_row.set(str(int(snap["header_row"])))
+        # キーなしは OFF（CLI と同じ解釈）
+        es_on, es_path = cfg.summary_to_ui(snap.get("excel_summary"))
+        self._excel_summary_on.set(es_on)
+        self._excel_summary.set(es_path)
         self._on_mode()
 
     def save_state(self) -> None:

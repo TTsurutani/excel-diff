@@ -32,7 +32,9 @@ class TabFileDiff(tk.Frame):
         self._strike  = tk.BooleanVar(value=cfg.get("file_diff", "strikethrough"))
         self._open_br = tk.BooleanVar(value=cfg.get("file_diff", "open_browser"))
         self._mode    = tk.StringVar(value=cfg.get("file_diff", "diff_mode", "lcs"))
-        self._excel_summary = tk.StringVar(value=cfg.get("file_diff", "excel_summary", ""))
+        _es_on, _es_path = cfg.summary_to_ui(cfg.get("file_diff", "excel_summary"))
+        self._excel_summary_on = tk.BooleanVar(value=_es_on)
+        self._excel_summary = tk.StringVar(value=_es_path)
         self._header_row = tk.StringVar(value=str(cfg.get("file_diff", "header_row", 1)))
 
         self._opt_built = False
@@ -165,8 +167,12 @@ class TabFileDiff(tk.Frame):
             filetypes=[("JSON", "*.json"), ("All", "*.*")],
         ).pack(fill="x", **pad)
 
+        tk.Checkbutton(
+            g, text="集約Excelを出力（保存先が空欄なら <新ファイル名>_diff.xlsx）",
+            variable=self._excel_summary_on,
+        ).pack(anchor="w", **pad)
         FileSelectRow(
-            g, "集約Excel", self._excel_summary,
+            g, "集約Excel保存先", self._excel_summary,
             filetypes=[("Excel", "*.xlsx"), ("All", "*.*")],
         ).pack(fill="x", **pad)
 
@@ -203,7 +209,8 @@ class TabFileDiff(tk.Frame):
             "diff_mode":     self._mode.get(),
             "key_cols":      self._key_cols.get(),
             "sub_key_cols":  self._sub_key_cols.get(),
-            "excel_summary": self._excel_summary.get(),
+            "excel_summary": cfg.summary_from_ui(
+                self._excel_summary_on.get(), self._excel_summary.get()),
             "header_row":    self._get_header_row(),
         }
 
@@ -226,7 +233,6 @@ class TabFileDiff(tk.Frame):
             "key_cols":   self._key_cols,
             "sub_key_cols": self._sub_key_cols,
             "diff_mode":  self._mode,
-            "excel_summary": self._excel_summary,
         }
         for key, var in mapping.items():
             if key in snap:
@@ -237,6 +243,10 @@ class TabFileDiff(tk.Frame):
             self._open_br.set(bool(snap["open_browser"]))
         if "header_row" in snap:
             self._header_row.set(str(int(snap["header_row"])))
+        # キーなしは OFF（CLI と同じ解釈）
+        es_on, es_path = cfg.summary_to_ui(snap.get("excel_summary"))
+        self._excel_summary_on.set(es_on)
+        self._excel_summary.set(es_path)
         self._on_mode()
 
     def save_state(self) -> None:
@@ -260,7 +270,7 @@ class TabFileDiff(tk.Frame):
         if self._mode.get() == "key" and not self._key_cols.get().strip():
             messagebox.showerror("エラー", "キーJOINモード: キー列を指定してください")
             return
-        if self._excel_summary.get().strip() and self._mode.get() != "key":
+        if self._excel_summary_on.get() and self._mode.get() != "key":
             messagebox.showerror(
                 "エラー",
                 "集約Excelを使うにはキーJOINモード（キー列指定）が必要です",
@@ -282,7 +292,8 @@ class TabFileDiff(tk.Frame):
             self._strike.get(), self._mode.get(),
             self._key_cols.get().strip(), self._sub_key_cols.get().strip(),
             self._open_br.get(),
-            self._excel_summary.get().strip(), self._get_header_row(),
+            cfg.summary_from_ui(self._excel_summary_on.get(), self._excel_summary.get()),
+            self._get_header_row(),
         )
         self.after(100, self._poll)
 
@@ -301,7 +312,7 @@ class TabFileDiff(tk.Frame):
         self, old_file, new_file, output, sheet_old, sheet_new, include_cols,
         matchers_file, strikethrough, diff_mode, key_cols_str,
         sub_key_cols_str, open_browser,
-        excel_summary="", header_row=1,
+        excel_summary=False, header_row=1,
     ) -> None:
         from excel_diff.reader import read_workbook, filter_sheets_by_pattern
         from excel_diff.diff_engine import diff_files, RowTag
@@ -365,10 +376,15 @@ class TabFileDiff(tk.Frame):
         out_path = output or str(Path(new_file).parent / f"{Path(new_file).stem}_diff.html")
         Path(out_path).write_text(render(file_diff), encoding="utf-8")
 
-        if excel_summary.strip():
+        from excel_diff.__main__ import (
+            resolve_excel_summary_path, _default_excel_summary_path,
+        )
+        summary_path = resolve_excel_summary_path(
+            excel_summary, _default_excel_summary_path(new_file)
+        )
+        if summary_path is not None:
             from excel_diff.xlsx_diff_renderer import render as render_xlsx
             from excel_diff.__main__ import _save_workbook_or_raise
-            summary_path = excel_summary.strip()
             wb = render_xlsx(
                 [file_diff], header_row=header_row, sub_key_cols=config.sub_key_cols
             )
