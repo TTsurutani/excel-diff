@@ -176,7 +176,12 @@ def _default_excel_summary_path(new_file: str) -> str:
 
 
 def _default_dir_summary_path(out_dir: str) -> str:
-    return os.path.join(out_dir, "★summary.xlsx")
+    """フォルダ比較の集約Excel既定パス。
+
+    <out_dir>/★<タイムスタンプ>_<out_dirのフォルダ名>.xlsx"""
+    from datetime import datetime
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return os.path.join(out_dir, f"★{ts}_{Path(out_dir).name}.xlsx")
 
 
 def normalize_excel_summary(v) -> Optional[str]:
