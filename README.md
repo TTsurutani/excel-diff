@@ -71,7 +71,7 @@ excel-diff-gui.exe
 | 比較シート | 省略時は全シートを比較 |
 | 比較列 | 省略時は全列（例: `A:C,E`） |
 | マッチャーJSON | カスタムマッチャー設定ファイル |
-| 集約Excelを出力 / 集約Excel保存先 | チェックONで全差分を1つのExcelに集約出力する。保存先が空欄なら `<出力フォルダ>/★summary.xlsx`（CLIの `--excel-summary` パス省略と同じ）。`--diff-mode key`（キー列指定）が前提 |
+| 集約Excelを出力 / 集約Excel保存先 | チェックONで全差分を1つのExcelに集約出力する。保存先が空欄なら `<出力フォルダ>/★<タイムスタンプ>_<出力フォルダ名>.xlsx`（CLIの `--excel-summary` パス省略と同じ）。`--diff-mode key`（キー列指定）が前提 |
 | ヘッダー行 | 集約Excelの「項目」列名の解決に使う行番号（1始まり、デフォルト1、0=ヘッダーなし）。差分計算そのものには影響しない |
 | 取り消し線も差分として扱う | オン時、セルの取り消し線有無を差分とみなす |
 | 完了後Excelで開く | オン時、★index.xlsx を自動でExcelに開く |
@@ -363,7 +363,7 @@ GUIでも「シート比較」「ファイル比較」「フォルダ比較」�
 python -m excel_diff old.xlsx new.xlsx --key-cols C --excel-summary
 excel-diff.exe old.xlsx new.xlsx --key-cols C --excel-summary out.xlsx
 
-:: フォルダ比較（パス省略時: <出力先フォルダ>/★summary.xlsx）
+:: フォルダ比較（パス省略時: <出力先フォルダ>/★<タイムスタンプ>_<出力フォルダ名>.xlsx）
 python -m excel_diff --dir old_dir new_dir --key-cols C --excel-summary
 ```
 
@@ -397,9 +397,9 @@ EQUAL行は出力しない（差分のみを列挙）。行全体の背景色は
 挙動は変更されない）。old側/new側で値が食い違う場合はold側を優先する。
 
 フォルダ比較時は既存の **`★index.xlsx`**（ファイルペアごとのサマリ）とは別ファイルとして
-共存する（`★index.xlsx` = サマリ＋リンク一覧、`★summary.xlsx` = 全差分の明細）。
+共存する（`★index.xlsx` = サマリ＋リンク一覧、`★<タイムスタンプ>_<出力フォルダ名>.xlsx` = 全差分の明細）。
 
-**保存先がExcelで開いている場合:** `★index.xlsx`・`★summary.xlsx` の保存先を起動中の
+**保存先がExcelで開いている場合:** `★index.xlsx`・`★<タイムスタンプ>_<出力フォルダ名>.xlsx` の保存先を起動中の
 Excelで開いたまま再実行しても、自動的にそのブックを閉じて（保存確認なし）保存をやり直す。
 Excel以外のプロセスが使用中の場合はエラーメッセージを表示して終了する。
 

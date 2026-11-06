@@ -138,7 +138,7 @@ class TabDirDiff(tk.Frame):
         ).pack(fill="x", padx=6, pady=2)
 
         tk.Checkbutton(
-            grp_opt, text="集約Excelを出力（保存先が空欄なら <出力フォルダ>/★summary.xlsx）",
+            grp_opt, text="集約Excelを出力（保存先が空欄なら <出力フォルダ>/★<タイムスタンプ>_<出力フォルダ名>.xlsx）",
             variable=self._excel_summary_on,
         ).pack(anchor="w", padx=6, pady=2)
         FileSelectRow(

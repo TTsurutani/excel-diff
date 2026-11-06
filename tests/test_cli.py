@@ -17,6 +17,7 @@ from excel_diff.__main__ import (
     _build_parser, _build_config, _apply_profile, _profiles_dir,
     _save_workbook_or_raise, _write_index_xlsx,
     normalize_excel_summary, resolve_excel_summary_path,
+    _default_dir_summary_path,
 )
 
 
@@ -181,6 +182,19 @@ def t_excel_summary_resolution_table():
         got = resolve_excel_summary_path(v, "D.xlsx")
         assert got == expected, f"{v!r}: {got!r} != {expected!r}"
     assert normalize_excel_summary(True) == ""
+
+
+def t_dir_summary_default_name():
+    """集約Excel既定名は ★<タイムスタンプ>_<出力フォルダ名>.xlsx。
+
+    出力フォルダ末尾に区切り文字があっても同じ。"""
+    import re
+    name = "old_vs_new_20261106_120000"
+    pat = r"★\d{8}_\d{6}_" + name + r"\.xlsx"
+    for d in [f"D:\\work\\{name}", f"D:\\work\\{name}\\"]:
+        p = _default_dir_summary_path(d)
+        assert os.path.dirname(p).rstrip("\\") == d.rstrip("\\"), p
+        assert re.fullmatch(pat, os.path.basename(p)), p
 
 
 def t_gui_summary_roundtrip_matches_cli():
@@ -461,6 +475,7 @@ if __name__ == "__main__":
     _run_test("集約Excel: パス省略でconst空文字列",       t_excel_summary_bare_flag_yields_empty_string)
     _run_test("集約Excel: パス指定が反映される",           t_excel_summary_with_path)
     _run_test("集約Excel: 指定値の解釈テーブル",           t_excel_summary_resolution_table)
+    _run_test("集約Excel: フォルダ比較の既定ファイル名",    t_dir_summary_default_name)
     _run_test("集約Excel: GUI変換がCLI解釈と一致",         t_gui_summary_roundtrip_matches_cli)
     _run_test("ヘッダー行: デフォルトは1",                t_header_row_default_is_one)
     _run_test("ヘッダー行: 明示指定が反映される",          t_header_row_explicit_value)
