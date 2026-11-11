@@ -14,7 +14,7 @@ setup.bat
 git config core.hooksPath .githooks
 ```
 
-`setup.bat` が仮想環境の作成・依存インストール・テストデータ生成を一括で行う。  
+先に uv を入れておく（`winget install astral-sh.uv`）。`setup.bat` は `uv sync` で仮想環境（`.venv`）を pyproject.toml と uv.lock から作り、テストデータも生成する。  
 `git config core.hooksPath .githooks` により、`.py` 変更時に EXE をバックグラウンド自動ビルドする `post-commit` フックが有効になる（`.githooks/` 配下でバージョン管理）。
 
 ---
@@ -639,7 +639,7 @@ excel-diff.exe --split book.xlsx --name-regex "^\d+_(.+)"
 > **Windows での Excel 互換性**  
 > Windows 環境では `pywin32`（Excel COM）を使ってシート分割を行う。  
 > これによりデータ入力規則・条件付き書式・ピボットテーブルなどをそのまま保持して分割できる。  
-> `pywin32` が未インストールの場合は openpyxl にフォールバックする（`pip install pywin32` または `setup.bat` で自動インストール）。
+> `pywin32` が未インストールの場合は openpyxl にフォールバックする（pywin32 は依存パッケージに含まれており、`setup.bat`（`uv sync`）で入る）。
 
 ---
 
@@ -744,10 +744,11 @@ CRM自動生成データと手動メンテのExcel原本など、由来の異な
 
 ```bat
 :: テストデータ生成
-python tests/make_fixtures.py
+uv run python tests/make_fixtures.py
 
 :: ユニットテスト実行
-python tests/test_diff.py
+uv run python tests/test_diff.py
+uv run python tests/test_cli.py
 ```
 
 詳細な仕様・アルゴリズム・データモデルは [SPEC.md](SPEC.md) を参照。  

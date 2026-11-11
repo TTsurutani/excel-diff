@@ -10,18 +10,9 @@ if not exist ".venv" (
     exit /b 1
 )
 
-call .venv\Scripts\activate.bat
-
-:: PyInstaller がなければインストール
-pip show pyinstaller > nul 2>&1
-if errorlevel 1 (
-    echo PyInstaller をインストール中...
-    pip install pyinstaller
-)
-
 :: ビルド
 echo ビルド中...
-pyinstaller ^
+uv run pyinstaller ^
     --onefile ^
     --name excel-diff ^
     --clean ^

@@ -12,6 +12,7 @@ venv/
 build/
 dist/
 *.spec
+!excel-diff-gui.spec
 build.log*
 
 # テストデータ（生成物）
