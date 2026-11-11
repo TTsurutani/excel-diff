@@ -22,6 +22,11 @@
 - テストが通らない場合は報告してから次に進むこと
 - 静的チェックの警告は「既存だから無視」せず、自分の変更が原因でないことを確認すること
 
+## Python 環境
+- 依存パッケージの追加・削除は `uv add` / `uv remove` で行い、pip を使わない。`.venv` は `uv sync` で作る
+- テスト: `uv run python tests/test_diff.py` と `uv run python tests/test_cli.py`（pytest ではなく直接実行する）
+- exe のビルド: `build.bat`（CLI）、`build_gui.bat`（GUI、git 管理の `excel-diff-gui.spec` を使う）。`.githooks/post-commit` も `.py` の変更を含むコミットで同じものを作る
+
 ## 成果物ルール
 - 出力前に行数・カラム数をカウントして報告すること
 

@@ -9,8 +9,6 @@ if not exist ".venv" (
     exit /b 1
 )
 
-call .venv\Scripts\activate.bat
-
 echo 実行中の excel-diff-gui.exe を確認中...
 taskkill /f /im excel-diff-gui.exe > nul 2>&1
 if errorlevel 1 (
@@ -20,14 +18,8 @@ if errorlevel 1 (
 )
 echo.
 
-pip show pyinstaller > nul 2>&1
-if errorlevel 1 (
-    echo PyInstaller をインストール中...
-    pip install pyinstaller
-)
-
 echo ビルド中...
-pyinstaller --noconfirm excel-diff-gui.spec
+uv run pyinstaller --noconfirm excel-diff-gui.spec
 
 echo.
 if exist "dist\excel-diff-gui.exe" (
